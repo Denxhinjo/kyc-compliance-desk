@@ -1,0 +1,7 @@
+# Postgres driver. psycopg 3 (not psycopg2 — that is maintenance-only now).
+# [binary] ships precompiled wheels so there is no C toolchain needed.
+psycopg[binary]==3.2.3
+
+# Reads the single root .env so the worker uses the same configuration as
+# /web and docker-compose.
+python-dotenv==1.0.1

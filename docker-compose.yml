@@ -1,0 +1,33 @@
+# Local development infrastructure.
+#
+# Only Postgres runs in Docker. /web and /worker run directly on the host so
+# that hot-reload is instant and Windows file-watching stays sane.
+#
+# Compose automatically reads the root .env file for the ${...} values below.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: kyc_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      # host:container — the container is always 5432 internally.
+      - "${POSTGRES_HOST_PORT}:5432"
+    volumes:
+      # Named volume: data survives `docker compose down`, but not `down -v`.
+      - kyc_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready returns 0 only once Postgres is accepting connections.
+      # Without this, "container started" would not mean "database usable".
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  kyc_pgdata:
