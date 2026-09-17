@@ -86,3 +86,10 @@ SWEEP_BATCH_SIZE = _int("SWEEP_BATCH_SIZE", "50")
 # opensanctions is richer but CC-BY-NC, so commercial use needs a licence and
 # it is deliberately not the default.
 SANCTIONS_SOURCE = os.environ.get("SANCTIONS_SOURCE") or "synthetic"
+
+# --- Queue retention (the loose end from Phase 2) ---------------------------
+
+# How long a completed job is kept. Only 'done' jobs are ever deleted; parked
+# ones are the dead letter queue and stay until a human deals with them.
+JOB_RETENTION_DAYS = _float("JOB_RETENTION_DAYS", "7")
+JOB_CLEANUP_INTERVAL_HOURS = _float("JOB_CLEANUP_INTERVAL_HOURS", "6")

@@ -22,6 +22,20 @@ export default async function Home() {
             for a decision.
           </span>
         </Link>
+        <Link className="home-link" href="/desk">
+          <strong>Compliance review desk →</strong>
+          <span>
+            Staff only. The queue of cases automation referred to a human, and
+            the evidence needed to decide them.
+          </span>
+        </Link>
+        <Link className="home-link" href="/stats">
+          <strong>Stats →</strong>
+          <span>
+            Throughput, how much is decided without a human, and how long a
+            decision takes. Every figure computed from the database.
+          </span>
+        </Link>
       </div>
 
       <h2>System</h2>

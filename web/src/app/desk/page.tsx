@@ -108,11 +108,22 @@ export default async function QueuePage() {
       </div>
 
       {rows.length === 0 ? (
-        <p className="empty">
-          Nothing waiting. Cases arrive here when automatic scoring refers
-          them — a score between 20 and 79, or a sanctions match that needs a
-          human to confirm identity.
-        </p>
+        /* An empty queue is success, not an error, and it is a state a
+           visitor may well land on. It should read as "all clear" and explain
+           what would put a case here — not look like something failed. */
+        <div className="empty queue-clear">
+          <strong>The queue is clear.</strong>
+          <p>
+            Nothing is waiting for a human right now. A case arrives here when
+            automatic scoring refers it — a risk score between 20 and 79, or a
+            sanctions name match, which never refuses anyone on its own and
+            always needs a person to confirm identity.
+          </p>
+          <p className="dim small">
+            <Link href="/apply">Create an application</Link> and complete
+            verification to put one here.
+          </p>
+        </div>
       ) : (
         <QueueTable rows={rows} />
       )}

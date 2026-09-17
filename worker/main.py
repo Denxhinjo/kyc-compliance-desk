@@ -26,6 +26,7 @@ import handlers  # noqa: F401
 import result_handler  # noqa: F401
 import screening_handler  # noqa: F401
 import sweeper  # noqa: F401
+import retention  # noqa: F401
 from config import (
     POLL_SECONDS,
     REAP_INTERVAL_SECONDS,
@@ -129,10 +130,13 @@ def main() -> int:
     # Make sure the recurring sweep exists. Every worker does this at startup;
     # the partial unique index means only the first one actually inserts.
     try:
-        if sweeper.ensure_scheduled(db.connection()):
+        conn = db.connection()
+        if sweeper.ensure_scheduled(conn):
             log.info("scheduled the recurring %s job", sweeper.JOB_TYPE)
+        if retention.ensure_scheduled(conn):
+            log.info("scheduled the recurring %s job", retention.JOB_TYPE)
     except psycopg.Error as err:
-        log.error("could not schedule the sweep job: %s", err)
+        log.error("could not schedule the recurring jobs: %s", err)
 
     empty_polls = 0
     processed = 0
