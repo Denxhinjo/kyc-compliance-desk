@@ -1,0 +1,8 @@
+# Keep line endings stable across machines.
+#
+# The migration runner hashes each .sql file to detect edits to already-applied
+# migrations. It normalises CRLF before hashing so a Windows checkout does not
+# look like tampering — but it is better not to create the discrepancy at all.
+* text=auto eol=lf
+*.sql text eol=lf
+*.py  text eol=lf

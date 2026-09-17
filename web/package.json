@@ -6,7 +6,8 @@
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke:audit": "node --experimental-strip-types --no-warnings scripts/smoke-audit.ts"
   },
   "dependencies": {
     "next": "15.5.4",

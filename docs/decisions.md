@@ -99,3 +99,133 @@ runs on **3001**. Both are set in one place (`.env` and `web/package.json`).
   logged itself.
 - Database stopped: page renders the `ECONNREFUSED` detail, worker logs errors;
   database restarted: both recover unattended.
+
+---
+
+## Phase 1 — Data model and audit log
+
+### What we built
+
+Six migrations, a migration runner, and the `logEvent()` helper in both
+languages. Five tables: `applications` (the case file), `vendor_events` (the
+postbox), `screening_results` (what the sanctions check found), `decisions`
+(the verdict), `audit_events` (the story).
+
+### Why `audit_events` is the important one
+
+Every other table records **state**. This one records **causation**.
+
+If `applications.status` says `decided` and `decisions.outcome` says
+`rejected`, you know what happened but not why, in what order, or on whose
+authority. A regulator's questions are almost always historical — who approved
+this, what did they see, was it auto-decided or reviewed by a human, show me
+every case where the officer overrode the system — and none of those are
+answerable from current state, because `applications.status` is overwritten on
+every transition. The intermediate states exist only if something wrote them
+down as they happened.
+
+That leads to the single most important rule in this phase:
+
+> The audit write goes in the **same transaction** as the state change it
+> describes.
+
+If they are separate, a crash between them leaves a state change with no trail
+— precisely the case where you most need one. This is why both helpers take a
+connection/client as their first argument instead of opening their own. It
+looks like an ergonomic detail. It is the whole design.
+
+On the TypeScript side the parameter is typed as `PoolClient` rather than
+"anything with a `.query` method", because the pool itself would satisfy the
+looser type and passing the pool would silently put the audit write outside the
+caller's transaction. Making that a compile error is cheaper than finding it in
+production.
+
+### Append-only in practice
+
+Rows go in, rows never change, rows never leave. A correction is a new row, not
+an edit. Three levels of enforcement, in increasing order of strength:
+convention (worthless), `REVOKE` (real, but does not bind the table owner), and
+a trigger that raises (binds everyone, owner included). We use the trigger, on
+`UPDATE`, `DELETE` **and `TRUNCATE`** — `TRUNCATE` does not fire `DELETE`
+triggers, so without the third one the whole log could be emptied by a
+statement the other two never see.
+
+The triggers are `FOR EACH STATEMENT`, not `FOR EACH ROW`, so they fire even
+when a statement matches no rows: `delete from audit_events where false` is
+refused too.
+
+And the honest limit: a superuser can disable a trigger. No in-database
+mechanism survives full control of the database. The real answer is shipping
+audit records to external WORM storage where the people who can edit the
+database do not control the archive. Out of scope here, and the README says so
+rather than implying a guarantee that does not exist.
+
+### Decisions and alternatives
+
+| Decided | Rejected | Reasoning |
+| --- | --- | --- |
+| UUID primary key on `applications` | `bigserial` | The id appears in URLs and goes to the vendor. Sequential ids leak business volume and invite walking `/status/1`, `/status/2`. Internal tables keep integer keys. |
+| `decisions` holds terminal outcomes only | also storing "referred to review" | If the table held verdicts and deferrals, "what was decided?" would stop having one answer. Referral is a status change plus an audit event. |
+| One decision per application (unique index) | many | Re-deciding an appealed case would be a deliberate migration, not something that quietly starts happening. |
+| `raw_body` **and** `payload` on `vendor_events` | just `jsonb` | `jsonb` reorders keys, drops duplicates and normalises numbers, so it cannot be used to re-verify a vendor signature computed over the exact bytes. jsonb to query, text to prove. |
+| One row per screening match | one row per application with a boolean | A common name hits several list entries and the officer must dismiss each separately. |
+| `match_score numeric(5,2)` | boolean matched yes/no | The threshold for "a hit" is a business decision, not a property of the data. |
+| Mandatory `reason` as a DB constraint | form validation only | A form validation is a request; a constraint is a guarantee. |
+| `risk_score_at_decision` stored | recompute on demand | Scoring rules change. "Why was this approved in March?" needs March's number. |
+| No `down` migrations | reversible migrations | A rollback script written calm and run panicked, never tested, is worse than none. Undo by writing a new migration. |
+| Runner in Python under `/db` | inside `/web`, or a shell script | It is a script, not a service. It re-declares its own config loading rather than importing `worker/db.py`, so the shared schema does not start depending on one of the two services. |
+
+### The bug this phase caught, which is worth the whole phase
+
+The first run of the Python smoke test printed a perfect seven-event timeline
+— and had written nothing. Every row vanished.
+
+The cause is a genuine psycopg trap. By default a psycopg connection opens a
+transaction implicitly on the first statement and holds it open until you
+commit. The script's first action was a `SELECT`, which started that implicit
+transaction. Every subsequent `with conn.transaction():` block therefore found
+a transaction already running, so instead of being a real transaction each one
+became merely a **savepoint** inside it. Nothing was durable. A single stray
+`rollback()` at the end of the script discarded all of it, and because the
+script had read its own uncommitted writes, the output looked completely
+correct.
+
+The fix is `autocommit=True` on the worker's connection. That sounds like the
+opposite of careful, and it is not: with no implicit transaction, every
+`with conn.transaction():` block genuinely is the outermost one and commits
+when it exits. The rule becomes visible — anything that must be atomic is
+inside an explicit block, and anything outside one is a single self-contained
+statement.
+
+The general lesson, and the reason this is written down: **a test that only
+checks its own output can pass while writing nothing.** The verification that
+caught it was querying the database from a separate connection afterwards.
+
+### Things worth knowing
+
+- **`now()` is transaction start time**, not statement time. Several events
+  written in one transaction share an identical `occurred_at`. Timelines are
+  therefore ordered by `id`, not by timestamp.
+- **Gaps in `audit_events.id` are normal.** Identity sequences do not return
+  numbers after a rollback, so a rolled-back event burns an id permanently. A
+  gap is not evidence of deletion.
+- **`pg` is CommonJS.** Named imports (`import { Pool } from "pg"`) work under
+  Next's bundler but fail under plain Node ESM, which cannot reliably see the
+  named exports of a CJS module. `import pg from "pg"` works in both.
+- **Checksums must normalise line endings**, or the same migration hashes
+  differently on Windows and Linux and looks like it was tampered with.
+
+### Evidence
+
+- `migrate.py status` pending → applied; a second `up` is a clean no-op.
+- Editing an applied migration is detected and refused, with both hashes shown.
+- A full case: application created, three status transitions, a vendor event, a
+  screening match, a decision — seven audit events, in order.
+- One audit row written from TypeScript, six from Python, one table.
+- A failing transaction leaves the status unchanged **and** no audit row,
+  proving the two writes are genuinely bound together.
+- `UPDATE`, `DELETE`, `DELETE ... WHERE false` and `TRUNCATE` on `audit_events`
+  all refused; 7 rows still present afterwards.
+- Six constraint violations refused: unknown status, lowercase country code,
+  blank decision reason, second decision on one application, duplicate vendor
+  event id, screening score above 100.

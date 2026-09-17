@@ -6,6 +6,10 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    // The scripts/ files are run directly by Node's type stripping, which
+    // resolves real paths, so their imports must carry the .ts extension.
+    // Legal because we never emit JavaScript from tsc.
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",

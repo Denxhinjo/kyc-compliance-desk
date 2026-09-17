@@ -1,4 +1,8 @@
-import { Pool } from "pg";
+// `pg` is a CommonJS package. Importing its default export and destructuring
+// works both inside Next.js (which bundles) and under plain Node ESM (which
+// does not, and cannot reliably see named exports of a CJS module).
+import pg from "pg";
+import type { Pool, PoolClient } from "pg";
 
 /**
  * A single shared connection pool for the whole web app.
@@ -23,7 +27,7 @@ function createPool(): Pool {
       "DATABASE_URL is not set. Copy .env.example to .env at the repo root.",
     );
   }
-  return new Pool({
+  return new pg.Pool({
     connectionString,
     // Shows up in Postgres' pg_stat_activity, so you can tell at a glance
     // which service a connection belongs to. Free, and invaluable when
@@ -98,4 +102,36 @@ function describeError(err: unknown): string {
     return code ? `${base} (${code})` : base;
   }
   return String(err);
+}
+
+/**
+ * Run a function inside a single database transaction.
+ *
+ * Everything the callback does on `client` either commits together or rolls
+ * back together. This exists mainly so that a state change and the audit event
+ * describing it cannot come apart — see logEvent() in ./audit.ts.
+ *
+ * The callback gets a PoolClient (one specific connection), not the pool.
+ * Queries run on the pool each get an arbitrary connection, so they would not
+ * be part of this transaction at all.
+ */
+export async function withTransaction<T>(
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const result = await fn(client);
+    await client.query("commit");
+    return result;
+  } catch (err) {
+    // If the rollback itself fails the connection is already unusable; the
+    // original error is the interesting one, so don't let this mask it.
+    await client.query("rollback").catch(() => undefined);
+    throw err;
+  } finally {
+    // Always hand the connection back, committed or not. Forgetting this is
+    // the classic way to exhaust a pool and hang the whole app.
+    client.release();
+  }
 }

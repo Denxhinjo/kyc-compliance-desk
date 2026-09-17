@@ -32,10 +32,26 @@ def connect() -> psycopg.Connection:
     No connection pool here, on purpose. The worker is a single loop doing one
     thing at a time, so it holds exactly one long-lived connection. /web needs
     a pool because it serves many requests concurrently; the worker does not.
+
+    On autocommit=True — this is not laziness, it is the opposite:
+
+    By default psycopg opens a transaction implicitly on the first statement
+    and leaves it open until you commit. A `with conn.transaction():` block
+    then finds a transaction already running, so instead of being a real
+    transaction it becomes a mere SAVEPOINT inside it — and nothing is durable
+    until someone calls commit(). One stray rollback() later, work that looked
+    committed silently disappears.
+
+    With autocommit=True there is no implicit transaction, so every
+    `with conn.transaction():` block IS the outermost one and commits when it
+    exits. The rule becomes simple and visible: anything that must be atomic
+    goes inside an explicit transaction() block, and anything not in one is a
+    single self-contained statement.
     """
     return psycopg.connect(
         database_url(),
         connect_timeout=5,
+        autocommit=True,
         # Identifies this service in Postgres' pg_stat_activity, so you can see
         # at a glance which service a connection belongs to. Free, and
         # invaluable when something is holding a lock.
@@ -83,8 +99,8 @@ class Database:
             cur.execute("select now()::text, current_database(), pg_backend_pid()")
             row = cur.fetchone()
             assert row is not None
-        # psycopg opens a transaction implicitly; close it so the connection
-        # does not sit "idle in transaction", which blocks vacuum and can hold
-        # locks. This matters a great deal once there are real tables.
-        conn.commit()
+        # No commit needed: the connection is in autocommit mode, so this read
+        # did not leave a transaction open. Before that change this had to
+        # commit explicitly, or the connection would sit "idle in transaction"
+        # between heartbeats — which blocks vacuum and can hold locks.
         return row[0], row[1], row[2]

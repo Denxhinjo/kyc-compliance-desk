@@ -55,3 +55,51 @@ is how we showed `kyc_web` and `kyc_worker` hitting the same database.
 **Health check (Docker).** A command Docker runs repeatedly to decide whether a
 container is genuinely usable, not merely started. Ours runs `pg_isready`;
 without it, "container up" would not mean "database ready".
+
+## Added in Phase 1
+
+**Sanctions list.** A government-published list of people and entities you are
+forbidden to do business with — US OFAC, the EU consolidated list, UK HMT. A
+name appearing on one is not a suspicion, it is a prohibition.
+
+**PEP — Politically Exposed Person.** Someone in a prominent public role, or
+close to one. Not disqualifying, and not an accusation: it triggers extra
+scrutiny because such people carry higher bribery and corruption risk.
+
+**Idempotency key.** A value that identifies a message uniquely, so that
+receiving it twice has the same effect as receiving it once. Ours is
+`(vendor, vendor_event_id)`, enforced by a unique constraint.
+
+**Append-only.** Rows are inserted, never updated or deleted. A correction is a
+new row recording the correction, not an edit to the original.
+
+**WORM — write-once-read-many.** Storage that physically cannot be rewritten.
+Where audit records ultimately belong, because a database superuser can always
+disable a database trigger.
+
+**Transactional DDL.** Postgres can `CREATE TABLE`, `ALTER` and `INSERT` inside
+one transaction and roll them all back together. Many databases cannot. It is
+why a migration here never half-applies.
+
+**Advisory lock.** A lock on an arbitrary number rather than on a row or table,
+used to make sure only one process does something at a time. The migration
+runner takes one so two deploys cannot migrate simultaneously.
+
+**SQLSTATE.** Postgres' standard five-character error code. `23505` is a unique
+violation (how duplicate webhooks are detected), `23514` a check constraint,
+`28P01` a bad password, `3D000` no such database.
+
+**Savepoint.** A marker inside a transaction you can roll back to without
+abandoning the whole transaction. Relevant because a nested
+`conn.transaction()` in psycopg becomes a savepoint rather than a real
+transaction — which is how a test can appear to write data and actually write
+nothing.
+
+**Statement-level vs row-level trigger.** A row-level trigger fires once per
+affected row; a statement-level one fires once per statement, even when it
+affects no rows. The append-only triggers are statement-level so that a
+`DELETE` matching nothing is still refused.
+
+**Migration checksum.** A hash of a migration file recorded when it is applied,
+so that editing an already-applied migration is detected instead of silently
+leaving the database and the repository disagreeing.
