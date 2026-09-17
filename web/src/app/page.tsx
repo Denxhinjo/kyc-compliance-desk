@@ -1,26 +1,30 @@
+import Link from "next/link";
 import { checkDatabase } from "@/lib/db";
 
-/**
- * Force this page to be rendered on every request.
- *
- * By default Next.js would notice this page has no dynamic inputs and render
- * it once at build time — which would mean the "database connected" message
- * reported the state of the world during `next build`, not now. For a health
- * check that is worse than useless.
- */
 export const dynamic = "force-dynamic";
 
-// This is a Server Component: it runs only on the server and its code is
-// never sent to the browser. That is what lets it hold a Postgres connection
-// and still be plain React — there is no API route in between.
 export default async function Home() {
   const health = await checkDatabase();
 
   return (
     <main>
       <h1>KYC Onboarding &amp; Compliance Review Desk</h1>
-      <p className="sub">Phase 0 — foundations. Connectivity check only.</p>
+      <p className="sub">
+        Identity verification and the back-office desk where a compliance officer
+        handles what cannot be decided automatically.
+      </p>
 
+      <div className="home-links">
+        <Link className="home-link" href="/apply">
+          <strong>Open an account →</strong>
+          <span>
+            The applicant&apos;s journey: details, identity verification, waiting
+            for a decision.
+          </span>
+        </Link>
+      </div>
+
+      <h2>System</h2>
       {health.ok ? (
         <div className="card ok">
           <p className="status ok">Database connected</p>
@@ -32,9 +36,6 @@ export default async function Home() {
             <dt>Version</dt>
             <dd>{health.version}</dd>
           </dl>
-          <p className="hint">
-            Queried live by a React Server Component on this request.
-          </p>
         </div>
       ) : (
         <div className="card bad">

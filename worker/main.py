@@ -20,7 +20,10 @@ from types import FrameType
 
 import psycopg
 
-import handlers  # noqa: F401  — importing registers the handlers
+# Importing these registers their handlers in the registry. The noqa silences
+# "imported but unused" — the import IS the use.
+import handlers  # noqa: F401
+import didit_handler  # noqa: F401
 from config import (
     POLL_SECONDS,
     REAP_INTERVAL_SECONDS,

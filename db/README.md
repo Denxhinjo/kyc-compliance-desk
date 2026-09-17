@@ -38,6 +38,7 @@ Migrations arrive in Phase 1.
 | `006_audit_events_append_only.sql` | The triggers that make "append-only" true. |
 | `007_decisions_allow_referred.sql` | Adds `referred` as an outcome; swaps the unique index for a partial one covering terminal verdicts only. |
 | `008_jobs.sql` | The job queue: the only channel between the two services. |
+| `009_vendor_didit.sql` | Switches the default vendor to Didit. Sumsub needed a business account. |
 
 ## The runner
 

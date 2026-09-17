@@ -56,7 +56,13 @@ bonus. A working feature I don't understand is a failure.
     
 - **Worker**: Python. Sanctions screening and risk scoring only.
 - **Database**: PostgreSQL. Also carries the job queue.
-- **ID verification**: Sumsub sandbox (free).
+- **ID verification**: Didit. Sumsub was the original choice but requires a
+
+    business account, so sandbox keys were unobtainable. Didit publishes its
+
+    contract and offers self-serve sandbox access. A local simulator speaking
+
+    the same contract is the default, so the repo runs with no vendor account.
 - **Sanctions data**: OpenSanctions (free, open data).
 - **Hosting**: Railway. Local dev via docker-compose.
 
@@ -141,7 +147,7 @@ docker-compose.yml
 1. Foundations - repo, both services, local Postgres, everything talking
 2. Data model + append-only audit log
 3. The job queue (SKIP LOCKED) - the architectural centrepiece
-4. Applicant flow + Sumsub sandbox + webhook with idempotency
+4. Applicant flow + Didit + webhook with idempotency
 5. Python worker consumes jobs, fetches vendor results
 6. Sanctions screening + risk scoring + tests
 7. The compliance review desk
@@ -253,13 +259,15 @@ that no job is ever processed twice.
 
 ~~~
 
-## Phase 3 — Applicant flow + Sumsub + webhook
+## Phase 3 — Applicant flow + Didit + webhook
 
 ~~~
 
 Start Phase 3: the applicant flow and the vendor integration.
 
-I have a Sumsub sandbox account with keys in .env.
+Didit requires a business account, so there are no vendor keys. A local
+
+simulator speaks Didit's published contract instead.
 
 Build:
 
@@ -267,8 +275,8 @@ Build:
     
     with status "started"
     
-- Sumsub's verification screen embedded, so I can complete a test check
-- A webhook endpoint that verifies Sumsub's signature, stores the raw message
+- A verification screen, so I can complete a test check
+- A webhook endpoint that verifies Didit's signature, stores the raw message
     
     in vendor_events, enqueues a job, and returns 200 immediately
     
@@ -295,7 +303,7 @@ Start Phase 4: the Python worker processing verification results.
 
 Build:
 
-- A job handler that fetches the full result from Sumsub's API and updates the
+- A job handler that fetches the full result from Didit's API and updates the
     
     application
     
@@ -305,7 +313,7 @@ Build:
     
 - A sweeper job every 15 minutes that finds applications stuck in "checking"
     
-    and asks Sumsub directly what happened
+    and asks Didit directly what happened
     
 
 Explain:
@@ -420,7 +428,7 @@ stated, so I can publish them honestly.
 Start Phase 8: deploy and document.
 
 - Deploy web app, worker and database to Railway
-- Production env vars and the Sumsub webhook URL pointed at the live app
+- Production env vars and the Didit webhook URL pointed at the live app
 - A README explaining what this is, the architecture, how to run it locally,
     
     and — most importantly — the async/idempotency problem and how it's solved

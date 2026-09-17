@@ -160,3 +160,51 @@ of using a table as a queue.
 **`LISTEN`/`NOTIFY`.** Postgres' built-in publish/subscribe, which would let
 workers be woken instantly instead of polling. The upgrade path when polling
 latency starts to matter.
+
+## Added in Phase 3
+
+**Webhook.** A message a vendor POSTs to a URL of yours when something happens,
+instead of you repeatedly asking them whether anything has. Push rather than
+poll.
+
+**Webhook signature.** An HMAC of the message body, computed with a secret only
+you and the vendor share. Proves the message came from them and was not altered
+on the way. Prevents forgery — without it, anyone who finds your public URL can
+post "this applicant is approved".
+
+**HMAC.** Hash-based Message Authentication Code: a hash of a message combined
+with a secret key, so only someone holding the key can produce or check it.
+
+**Replay attack.** Resending a genuine, correctly signed message. A signature
+cannot detect it, because the message really is genuine. Defended against by a
+timestamp freshness window plus a unique constraint on the event id.
+
+**Timing attack.** Learning a secret from how long a comparison takes. String
+equality returns at the first differing byte, so it runs longer the more
+leading bytes match. `crypto.timingSafeEqual` compares the whole buffer every
+time.
+
+**Constant-time comparison.** A comparison whose duration does not depend on
+where the inputs differ. The defence against the above.
+
+**Raw body.** The exact bytes of an HTTP request, before any parsing. What a
+signature is computed over, and therefore what it must be verified against —
+parsing and re-serialising produces different bytes.
+
+**Idempotency key.** The value that identifies a message uniquely so that
+receiving it twice has the same effect as once. Didit supplies one as
+`event_id`.
+
+**Progressive enhancement.** Building so the page works without JavaScript and
+improves when JavaScript is available. A Next.js form submits to the server
+action directly when scripting is off — but only if the action is passed as a
+direct reference rather than wrapped in a client-side closure.
+
+**Server Action.** A function marked `"use server"` that the browser can call
+directly, with no API route written by hand. The body never reaches the
+browser. Every export in such a file becomes a callable endpoint, which is why
+they must all be async.
+
+**PEP / sanctions screening.** See Phase 1 — relevant here because a vendor
+returning "Approved" means the *document check* passed, not that the customer
+may be onboarded. Those are different claims and the system keeps them apart.

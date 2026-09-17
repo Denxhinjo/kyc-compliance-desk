@@ -445,3 +445,208 @@ share one transaction; external I/O sits outside it and is assumed repeatable.
 The concurrency proof counts rows in `audit_events`, which rejects `UPDATE` and
 `DELETE` at the database level. The evidence sits in a table that cannot be
 massaged after the fact.
+
+---
+
+## Phase 3 — Applicant flow, the vendor, and the webhook
+
+### The vendor changed, and why that is worth recording
+
+Sumsub requires a business account. There was no route to sandbox credentials
+for a portfolio project, so the stack changed to **Didit**, which offers
+self-serve sandbox access and publishes its contract openly.
+
+The replacement turned out to be better for the purpose. Sumsub has no reliable
+per-event identifier, so idempotency would have had to key on a hash of the
+request body — defensible, but a workaround. Didit's envelope carries
+`event_id`, which is exactly what `vendor_events.vendor_event_id` was designed
+for in Phase 1, and it sends `X-Timestamp` with a documented ±300s freshness
+rule, which turns replay protection from a paragraph of theory into code.
+
+Because there is still no account, the default is a **simulator** inside
+`/web` under `mock-vendor/` that speaks Didit's contract: it issues sessions,
+shows a verification screen, and posts back correctly signed webhooks. It is
+not a separate service — two services and one database is the ceiling, and demo
+scaffolding does not get to raise it. `DIDIT_MODE=live` points the same code at
+the real API and makes the simulator routes 404.
+
+The README states plainly that the integration is written against the published
+contract and **has not been tested against the live API**. A portfolio piece
+that overstates what it has verified is worse than one that admits a gap.
+
+### Why the webhook does almost nothing
+
+Didit allows a few seconds to respond and retries on 5xx, 404, timeout or
+connection failure — twice, at roughly one and four minutes, then it drops the
+delivery permanently.
+
+So doing the real work inline would be self-defeating: ten seconds of
+screening, a five-second vendor timeout, a retry that arrives while the first
+copy is still mutating the same rows. And the failure reinforces itself — the
+slower the processing, the more duplicates, which makes it slower still.
+
+The reframe that settles it:
+
+> **200 does not mean "I have done the work". It means "I have durably taken
+> responsibility for this message, and you may stop resending it."**
+
+Once the message is in `vendor_events` and a job is on the queue, that is a
+true statement, because both are committed and Phase 2's retry machinery will
+see the work through. So the endpoint does four fast local things: verify,
+store, enqueue, return.
+
+Two consequences of the retry policy worth designing around: a 500 from a
+transient database problem costs the message permanently after about five
+minutes — which is an argument for the Phase 4 sweeper, not a nicety. And a
+404 counts as retryable, so a typo'd webhook path looks like an outage rather
+than a misconfiguration.
+
+### The signature, and the attack it prevents
+
+A webhook endpoint is a public URL with no login. Anyone who finds it can post
+to it. Without verification, the obvious attack is to post
+`{"status":"Approved","vendor_data":"<their application id>"}` and approve
+oneself. That is **forgery**, and it is the first thing anyone would try.
+
+An HMAC signature closes it: the vendor and we share a secret, they sign the
+body with it, we recompute. A match proves the message came from someone
+holding the secret and was not altered in transit.
+
+**Three implementation details, each a real bug if missed:**
+
+*Verify the raw bytes, before parsing.* The signature covers exactly what was
+transmitted. Parsing and re-serialising changes whitespace and key order, so
+the signature stops matching — and the tempting fix is to verify against the
+re-serialised form, which means verifying a string we constructed rather than
+the one they signed. That silently destroys the guarantee while appearing to
+work. In Next.js, `await request.arrayBuffer()` gives the raw bytes, and
+nothing parses the body until verification passes.
+
+*Compare in constant time.* `===` on strings returns at the first differing
+byte, so it takes measurably longer the more leading bytes match, leaking the
+signature a byte at a time. `crypto.timingSafeEqual` always compares the whole
+buffer. It also throws on length mismatch — which would itself leak length —
+so lengths are checked first and a mismatch is rejected outright.
+
+*A signature does not stop replay.* Someone who captures a valid message can
+resend it unchanged forever; it really is from the vendor and really is
+unaltered.
+
+**We deliberately ignore the vendor's recommended header.** Didit sends three
+signatures and recommends `X-Signature-V2`, an HMAC over a canonicalised
+re-serialisation — sorted keys, compact separators, unescaped Unicode, whole
+floats normalised to integers. Verifying it means reimplementing *their* JSON
+serialiser exactly, and each of those four rules is a place where an
+implementation can differ subtly. The failure is not a loud crash: it is either
+mismatches on some payloads, which look like a vendor outage, or a "fix" that
+ends up verifying our own construction. `X-Signature` covers the raw bytes, and
+raw bytes have exactly one interpretation. V2 exists for frameworks that cannot
+reach the raw body; Next.js route handlers can. `X-Signature-Simple` is ignored
+entirely — it authenticates the envelope but not the body, and Didit themselves
+say that using it means treating the payload as untrusted.
+
+### Idempotency, and why vendors resend
+
+Vendors resend because **they cannot distinguish "my request never arrived"
+from "your response was lost on the way back"**. Both look identical from their
+side: bytes sent, nothing returned. Resending is the only safe choice. Add
+deploys, 500s, timeouts and load balancers that retry on their own, and
+duplicates stop being an edge case and become a guarantee.
+
+Two layers:
+
+**The database refuses the duplicate.** The insert is
+`on conflict (vendor, vendor_event_id) do nothing returning id`. No row
+returned means we have seen it, and **the job is enqueued only if the insert
+actually happened, in the same transaction**. Three deliveries, one row, one
+job.
+
+**The handler is safe to run twice anyway**, because Phase 2's at-least-once
+delivery means the worker itself can re-run a job. The technique:
+
+> Compute the desired state. Compare with the current state. Write only the
+> difference. Log only what was written.
+
+The second run finds an empty difference, so nothing is written and **no new
+audit rows appear**. That last part depends on `audit_events` recording state
+*changes* rather than handler *invocations* — get that wrong and a perfectly
+idempotent handler still leaves a growing trail of identical rows, which looks
+exactly like a bug.
+
+### Decisions worth explaining
+
+**Rejected webhooks are not stored.** The verification path is unauthenticated,
+so any database write there is a resource-exhaustion vector: an attacker could
+fill a table for free. Rejections go to the server log, which is bounded and
+rotated. A consequence is that `vendor_events.signature_verified` is true for
+every row by construction; the column stays for a future quarantine flow.
+
+**A missing `event_id` is a 400, not a 500.** Without it the message cannot be
+deduplicated, so processing it would be unsafe. 400 because it will never
+become valid — there is nothing for the vendor to retry.
+
+**Age is checked as a KYC rule, not a form rule.** A regulated business cannot
+onboard a minor, so under-18 is refused outright rather than flagged for
+review. Hand-rolled validation rather than zod, so the rule is readable as a
+rule rather than as a schema line.
+
+**The vendor call happens outside the database transaction.** Holding a
+transaction open across a network call to a third party means holding locks for
+however long their API takes. The session is created first, then the result is
+recorded.
+
+**`vendor_data` is the link, not `application_id`.** Didit's payload has a
+field called `application_id`, and it means *their* application — the app in
+your Didit account. Ours arrives as `vendor_data`, which we set when creating
+the session. Two different things with the same name, one of them a foreign key
+in our schema. Reading the wrong one would fail in a way that looks like data
+corruption.
+
+**"Approved" from the vendor does not mean the customer is approved.** It means
+the document check passed. Conflating a vendor's document verdict with our
+onboarding decision would be the single worst mistake available in this phase,
+so the handler maps every vendor status onto `checking` and leaves the
+lifecycle to Phase 4 and the decision to Phase 5.
+
+**Status only ever moves forward.** Webhooks can arrive out of order, and a
+late "In Progress" must not drag an application that has reached `checking`
+back a step.
+
+### Two bugs found while testing
+
+**Server Actions passed as inline closures are not server actions.** The verify
+and simulator forms originally did
+`useActionState(async () => startVerification(id), {})`. That wraps the action
+in a *client* function, so the form silently loses progressive enhancement —
+the rendered HTML contains no action fields at all and the form only works with
+JavaScript. The fix is to pass the server action directly and carry the id in a
+hidden input. Found because the no-JS submission produced no `$ACTION` fields
+to post.
+
+**A `"use server"` file may only export async functions.** `decodeToken` and
+`buildEnvelope` were exported from the simulator's `actions.ts`, which is a
+build error, not a style problem: every export in such a file becomes a
+callable endpoint. Moved to a plain module. The error message points at the
+export rather than at the directive that caused it, which is worth knowing.
+
+### Evidence
+
+- Form submitted, application created at `started`, `gb` normalised to `GB`,
+  redirect to the status page. An invalid submission returned five field errors
+  and created no row.
+- Verification session created, id stored, audit event written, applicant
+  redirected to the vendor screen.
+- Completing verification posted a signed webhook to the real endpoint over
+  HTTP, which stored the event and enqueued a job.
+- **The same webhook three times: HTTP 200, 200, 200 — one `vendor_events` row,
+  one job.** Responses `{"duplicate":false}` then `{"duplicate":true}` twice.
+- Tampered body, wrong secret, missing header and a 6-minute-old timestamp: all
+  **401**, `vendor_events` unchanged. The stale one logged
+  `timestamp is 361s out of date (max 300s)`.
+- **Idempotency**: state snapshot before and after re-running both jobs was
+  identical — `checking|4 audit rows|max audit id 2595|3 linked|updated_at
+  13:47:30.451893`. `updated_at` being unchanged proves not even a redundant
+  `UPDATE` was issued, since the trigger from migration 001 would have bumped
+  it.
+- Webhook responses returned in ~100ms in development, of which most is
+  framework overhead rather than the four statements.

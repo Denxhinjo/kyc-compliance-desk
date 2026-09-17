@@ -59,15 +59,71 @@ python -m venv .venv
 the web app and the worker. It is gitignored; `.env.example` is the committed
 inventory of every variable.
 
+## Identity verification
+
+The vendor is **Didit**. Sumsub was the original choice, but it requires a
+business account, so sandbox credentials were unobtainable for a demo that
+anyone should be able to clone and run.
+
+The integration is written against Didit's published contract
+([sessions](https://docs.didit.me/sessions-api/create-session),
+[webhooks](https://docs.didit.me/integration/webhooks)) and **has not been
+tested against their live API**, because this project has no Didit account.
+Saying so plainly matters more than the claim would be worth.
+
+By default `DIDIT_MODE=simulator` runs a local stand-in that speaks the same
+contract: it issues sessions, presents a verification screen, and posts back
+correctly signed `status.updated` webhooks. It lives inside `/web` under
+`mock-vendor/` — two services and one database is the ceiling, and demo
+scaffolding does not get to raise it. Setting `DIDIT_MODE=live` with an API
+key, workflow id and webhook secret points the same code at the real API; the
+simulator routes then return 404.
+
+### The webhook
+
+`POST /api/webhooks/didit` does four things and nothing else: verify the
+signature over the raw bytes, store the message, enqueue a job, return 200.
+
+**200 does not mean "I have done the work". It means "I have durably taken
+responsibility for this message, and you may stop resending it."** Didit allows
+a few seconds and retries on 5xx, 404, timeout or connection failure — twice,
+then it drops the delivery. Doing real work inline would guarantee timeouts,
+which cause retries, which cause concurrent duplicate processing.
+
+Three independent defences, because each one leaves a gap the others close:
+
+| Layer | Stops | Does not stop |
+| --- | --- | --- |
+| HMAC signature over raw bytes | Forgery — a stranger posting "approve me" | Replay of a genuine captured message |
+| `X-Timestamp` freshness (±5 min) | Replay outside that window | Replay inside it |
+| `UNIQUE (vendor, vendor_event_id)` | A replay having any effect at all | — |
+
+Verified over the **raw request body, before any JSON parsing**. Didit
+recommends their `X-Signature-V2` header, which signs a canonicalised
+re-serialisation; we use `X-Signature` over the exact bytes instead, because
+verifying V2 means reimplementing their serialiser and any mismatch is a silent
+security bug. Raw bytes have exactly one interpretation.
+
 ## Status
 
-Phase 2 complete. Both services connect to Postgres; the schema and the
-append-only audit log are in place; the job queue works and has been proved
-safe under two concurrent workers.
+Phase 3 complete. Both services connect to Postgres; the schema and the
+append-only audit log are in place; the job queue is proved safe under two
+concurrent workers; and an applicant can fill in the form, complete identity
+verification, and watch their status change as the webhook is processed
+asynchronously.
 
 ```bash
 python db/migrate.py up                     # apply the schema
 
-cd web  && npm run enqueue -- --count 100   # put work on the queue
-cd worker && .venv/Scripts/python main.py   # consume it (run several)
+cd web  && npm run dev                      # http://localhost:3001/apply
+cd worker && .venv/Scripts/python main.py   # consume the queue (run several)
+```
+
+Replay a webhook to see idempotency working:
+
+```bash
+cd web
+npm run webhook -- --application <uuid> --times 3   # 3x 200, one row, one job
+npm run webhook -- --application <uuid> --tamper    # 401
+npm run webhook -- --application <uuid> --stale     # 401
 ```
