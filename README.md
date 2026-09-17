@@ -119,6 +119,13 @@ cd web  && npm run dev                      # http://localhost:3001/apply
 cd worker && .venv/Scripts/python main.py   # consume the queue (run several)
 ```
 
+**Do not run `npm run build` while `npm run dev` is running.** They share the
+`.next` directory, so the build replaces the chunks the dev server is serving
+and every page then fails with `Cannot find module './vendor-chunks/…'`. The
+symptom looks like broken application code; it is not. Use `npm run build:check`
+instead, which builds into a separate directory, or stop the dev server first.
+If it has already happened: stop the dev server, delete `.next`, start it again.
+
 Replay a webhook to see idempotency working:
 
 ```bash

@@ -6,6 +6,7 @@
 # Node / Next.js
 node_modules/
 .next/
+.next-check/
 out/
 *.tsbuildinfo
 next-env.d.ts
