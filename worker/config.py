@@ -46,3 +46,33 @@ STALE_SECONDS = _float("JOB_STALE_SECONDS", "300")
 REAP_INTERVAL_SECONDS = _float("JOB_REAP_INTERVAL_SECONDS", "60")
 
 DEFAULT_MAX_ATTEMPTS = _int("JOB_MAX_ATTEMPTS", "5")
+
+# --- Vendor -----------------------------------------------------------------
+
+# 'simulator' or 'live'. The worker reads the same variable the web service
+# does, so the two halves of the integration can never disagree about which
+# vendor they are talking to.
+DIDIT_MODE = os.environ.get("DIDIT_MODE") or "simulator"
+DIDIT_BASE_URL = os.environ.get("DIDIT_BASE_URL") or "https://verification.didit.me"
+DIDIT_API_KEY = os.environ.get("DIDIT_API_KEY") or ""
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL") or "http://localhost:3001"
+
+# A vendor that hangs must not hold a worker forever. Shorter than
+# JOB_STALE_SECONDS by a wide margin, so a slow vendor produces a retry rather
+# than a job the reaper has to rescue.
+VENDOR_TIMEOUT_SECONDS = _float("VENDOR_TIMEOUT_SECONDS", "10")
+
+# --- Sweeper ----------------------------------------------------------------
+
+# How often the sweeper runs.
+SWEEP_INTERVAL_MINUTES = _float("SWEEP_INTERVAL_MINUTES", "15")
+
+# How long an application may sit waiting on the vendor before the sweeper goes
+# and asks directly. Must exceed the vendor's own retry schedule (Didit retries
+# at roughly one and four minutes), or the sweeper races deliveries that are
+# still in flight and does work the webhook was about to do anyway.
+SWEEP_STUCK_MINUTES = _float("SWEEP_STUCK_MINUTES", "10")
+
+# Applications examined per sweep. A cap so one sweep cannot monopolise a worker
+# after an outage has left thousands stuck.
+SWEEP_BATCH_SIZE = _int("SWEEP_BATCH_SIZE", "50")

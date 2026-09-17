@@ -1,26 +1,29 @@
 import crypto from "node:crypto";
+import { pool } from "@/lib/db";
 
 /**
  * SIMULATOR — stands in for POST https://verification.didit.me/v3/session/
  *
  * Exists because Didit requires a business account, so a reader cloning this
- * repository cannot obtain sandbox credentials. Rather than leave the vendor
- * integration untestable, this speaks the same contract:
+ * repository cannot obtain sandbox credentials. It speaks the same contract:
  * https://docs.didit.me/sessions-api/create-session
  *
- * It lives inside /web rather than being a third service, because the
- * architecture is two services and one database and that is not negotiable for
- * demo scaffolding. Everything simulated is namespaced under mock-vendor/ so
- * it can be deleted in one commit.
+ * It lives inside /web rather than being a third service, because two services
+ * and one database is the ceiling and demo scaffolding does not get to raise
+ * it. Everything simulated is namespaced under mock-vendor/ so it can be
+ * removed in one commit.
  *
- * It is stateless on purpose: the session token encodes what the verification
- * screen needs, so the simulator needs no table of its own and adds nothing to
- * the real schema.
+ * As of Phase 4 the simulator REMEMBERS sessions, in its own
+ * mock_vendor_sessions table. It has to: the sweeper can only be demonstrated
+ * if the vendor knows an outcome we were never told, which means the simulator
+ * must retain what happened when it deliberately drops a webhook. That table
+ * belongs to the pretend vendor, not to the domain model, and nothing outside
+ * these routes reads it.
  */
 
 export const dynamic = "force-dynamic";
 
-function guardSimulatorEnabled(): Response | null {
+function simulatorDisabled(): Response | null {
   if ((process.env.DIDIT_MODE ?? "simulator") === "live") {
     // In live mode this route must not answer at all. A simulator that stays
     // reachable in production is a way to forge verification sessions.
@@ -30,7 +33,7 @@ function guardSimulatorEnabled(): Response | null {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const disabled = guardSimulatorEnabled();
+  const disabled = simulatorDisabled();
   if (disabled) return disabled;
 
   const body = (await request.json()) as {
@@ -45,8 +48,14 @@ export async function POST(request: Request): Promise<Response> {
 
   const sessionId = crypto.randomUUID();
 
-  // Real Didit returns a 12-character opaque token. Ours carries its own state
-  // so there is nothing to store — same shape of thing, different contents.
+  await pool.query(
+    `insert into mock_vendor_sessions (session_id, vendor_data, status)
+     values ($1, $2, 'Not Started')`,
+    [sessionId, body.vendor_data],
+  );
+
+  // Real Didit returns a 12-character opaque token. Ours carries the session id
+  // so the verification screen needs no lookup to know which session it is.
   const token = Buffer.from(
     JSON.stringify({ sessionId, vendorData: body.vendor_data }),
     "utf8",

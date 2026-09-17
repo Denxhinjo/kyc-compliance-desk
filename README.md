@@ -106,11 +106,54 @@ security bug. Raw bytes have exactly one interpretation.
 
 ## Status
 
-Phase 3 complete. Both services connect to Postgres; the schema and the
-append-only audit log are in place; the job queue is proved safe under two
-concurrent workers; and an applicant can fill in the form, complete identity
-verification, and watch their status change as the webhook is processed
-asynchronously.
+Phase 4 complete. An applicant can fill in the form, complete identity
+verification, and watch the application move through its lifecycle on its own.
+Results are applied through a vendor-neutral adapter and guarded by an explicit
+state machine, so duplicate, late and out-of-order deliveries are harmless. A
+sweeper reconciles anything the vendor never managed to tell us.
+
+### The lifecycle
+
+```
+started -> submitted -> checking -> screening -> decided
+```
+
+Transitions are an explicit allow-list. Forward skips are permitted (a fast
+vendor can jump a stage); backward moves never are; and nothing reaches
+`decided` except from `screening` — "you may not decide on a customer you have
+not screened", enforced by the state machine rather than by convention.
+
+Two independent guards stop a late result overwriting a newer one, because they
+answer different questions:
+
+| Guard | Question | Catches |
+| --- | --- | --- |
+| State machine | Is this transition legal? | `decided -> checking`, and deciding without screening |
+| `vendor_result_at` | Is this result newer? | An older `Declined` overwriting a newer `Approved` — same stage, so the state machine cannot see it |
+
+The comparison is the vendor's clock against the vendor's clock. Comparing our
+observation time to their event time would mix two clocks and fail silently
+under skew.
+
+### The sweeper
+
+Webhooks are a delivery attempt, not a guarantee — Didit retries twice and then
+drops the message. A deploy, a 500, or an expired tunnel and the vendor has a
+verdict we never hear. Every 15 minutes a self-rescheduling job finds
+applications waiting longer than they should and asks the vendor directly.
+
+Webhooks are the optimisation; the sweeper is what makes the system correct.
+Push for latency, poll for correctness.
+
+```bash
+cd worker && .venv/Scripts/python -m pytest    # state machine tests
+
+cd web
+npm run demo -- new                            # an applicant + a session
+npm run demo -- complete <session> Approved    # vendor decides, webhook sent
+npm run demo -- complete <session> Approved --drop   # vendor decides, delivery lost
+npm run demo -- show <application>             # status + timeline
+```
 
 ```bash
 python db/migrate.py up                     # apply the schema

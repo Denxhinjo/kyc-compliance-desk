@@ -23,7 +23,8 @@ import psycopg
 # Importing these registers their handlers in the registry. The noqa silences
 # "imported but unused" — the import IS the use.
 import handlers  # noqa: F401
-import didit_handler  # noqa: F401
+import result_handler  # noqa: F401
+import sweeper  # noqa: F401
 from config import (
     POLL_SECONDS,
     REAP_INTERVAL_SECONDS,
@@ -123,6 +124,15 @@ def main() -> int:
     log.info("worker %s starting (poll %.1fs)", WORKER_ID, POLL_SECONDS)
 
     db = Database()
+
+    # Make sure the recurring sweep exists. Every worker does this at startup;
+    # the partial unique index means only the first one actually inserts.
+    try:
+        if sweeper.ensure_scheduled(db.connection()):
+            log.info("scheduled the recurring %s job", sweeper.JOB_TYPE)
+    except psycopg.Error as err:
+        log.error("could not schedule the sweep job: %s", err)
+
     empty_polls = 0
     processed = 0
     last_reap = 0.0

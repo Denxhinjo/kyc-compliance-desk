@@ -42,6 +42,16 @@ export function OutcomePicker({ token }: { token: string }) {
   return (
     <form action={action}>
       <input type="hidden" name="token" value={token} />
+      <label className="drop-toggle">
+        <input type="checkbox" name="dropWebhook" />
+        <span>
+          <strong>Record the outcome but drop the webhook</strong>
+          <em>
+            The vendor knows the answer; this application never hears it. Stages
+            the case the sweeper exists to recover.
+          </em>
+        </span>
+      </label>
       {state.error && (
         <p className="field-error" role="alert">
           {state.error}

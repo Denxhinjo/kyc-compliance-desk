@@ -102,7 +102,7 @@ export async function POST(request: Request): Promise<Response> {
     // process — and the vendor's retry gets a clean slate. This is the reason
     // the queue is a Postgres table rather than Redis.
     const jobId = await enqueueJob(client, {
-      type: "didit.process_webhook",
+      type: "vendor.process_webhook",
       payload: { vendor_event_id: vendorEventId },
     });
 

@@ -650,3 +650,222 @@ export rather than at the directive that caused it, which is worth knowing.
   it.
 - Webhook responses returned in ~100ms in development, of which most is
   framework overhead rather than the four statements.
+
+---
+
+## Phase 4 — The worker processing results
+
+### Why a lifecycle rather than a stored result
+
+The tempting design is a `verification_result` column: the vendor says
+Approved, write "approved", done.
+
+It breaks the moment anything goes wrong, because a result answers *what* and
+never *where*. When a case has sat untouched for an hour, `result is null`
+cannot distinguish between: the applicant never started; started and abandoned;
+finished but the webhook was lost; finished and our worker crashed mid-job.
+Those need four different responses — nudge the applicant, expire the case, ask
+the vendor, retry the job — and a result column collapses all of them into
+"nothing here yet".
+
+A lifecycle makes the *system's* position explicit rather than only the
+vendor's verdict, and that is what makes automated recovery possible at all.
+The sweeper's entire premise is the question "which applications are in a state
+they should have left by now?", and you cannot ask that of a nullable result.
+
+It is also the honest model of the domain. KYC is a process with stages,
+handoffs and waiting, not a function that returns a value.
+
+### Why the state machine makes out-of-order delivery safe
+
+At-least-once delivery plus network reordering means every message may arrive
+twice and any two may arrive in either order. "Apply what the message says" is
+therefore a bug: the last arrival wins regardless of whether it is the newest.
+
+A state machine turns ordering from something you hope about into something the
+code decides. Every update becomes "is this transition permitted from where we
+are?", and the answer is a property of the pair of states, not of arrival time.
+A late `checking` reaching a `decided` application is not a race that was lost;
+it is a transition that does not exist.
+
+The permitted edges:
+
+```
+started   → submitted, checking, screening
+submitted → checking, screening
+checking  → screening
+screening → decided
+decided   → (terminal)
+```
+
+Forward skips are allowed because a fast vendor genuinely can jump a stage.
+Backward moves never are. And note what is absent: **nothing reaches `decided`
+except `screening`.** That is not tidiness, it is a compliance rule — you may
+not decide on a customer you have not screened — enforced by the shape of the
+machine rather than by everyone remembering. There is a test whose only job is
+to fail if someone adds a convenient shortcut.
+
+The vendor's vocabulary is deliberately kept separate from ours. "Approved"
+from Didit means the *document check* passed; whether the customer may be
+onboarded depends on sanctions screening and risk scoring, which the vendor
+knows nothing about. Every terminal vendor outcome therefore maps to
+`screening` — "their part is done, ours begins" — and a test asserts that no
+vendor status can ever map to `decided`.
+
+### The late-result problem: both guards, because they answer different questions
+
+The brief offered transition rules **or** vendor timestamps. They solve
+different problems, and picking one leaves a real hole.
+
+**Transition rules alone.** They stop stage regression — `decided → checking`
+is not an edge. But two results that map to the *same* stage are invisible to
+them: a `Declined` and a corrected `Approved` arriving out of order are both a
+legal move to `screening`, so the older would be written and nothing would
+notice. The status did not regress; the content did, silently.
+
+**Vendor timestamps alone.** They order results correctly, including that case
+— but say nothing about legality. A timestamp-only system will happily take an
+application from `started` straight to `decided` because the message was newer.
+It also puts a third party's clock on the critical path, and skew between their
+servers is exactly where such a guard stops working without telling you.
+
+So:
+
+> The **state machine** governs legality — which transitions the process
+> permits. The **vendor timestamp** governs recency — which of two legal results
+> is newer.
+
+The state machine is the primary guarantee, because it is ours and trusts
+nobody else's clock. The timestamp is a tiebreaker *within* a stage. Both were
+demonstrated catching cases the other missed.
+
+Two details that matter:
+
+**The comparison is vendor clock against vendor clock, never ours against
+theirs.** `vendor_result_at` stores the vendor's own timestamp for the last
+result applied. Comparing our observation time to their event time mixes two
+clocks and reintroduces the skew problem the guard exists to avoid.
+
+**`vendor_result_at` is nullable, honestly.** Didit's webhook envelope carries
+an event timestamp, but their decision endpoint
+(`GET /v3/session/{id}/decision/`) publishes no result timestamp — only session
+`created_at` and `expires_at`, which mean something else. Rather than pass off a
+plausible wrong value, results we PULL leave it null and rely on the state
+machine alone. That is sound: a pulled result is by construction the session's
+current state, so it cannot be stale.
+
+### Why the sweeper exists
+
+A webhook is a delivery *attempt*, not a guarantee. Didit retries twice —
+roughly one and four minutes — then drops the message permanently. A deploy, a
+database blip that makes us answer 500, an expired tunnel, a firewall change,
+or a bug in our own handler all end identically: the vendor has a verdict, we
+never hear it, and the applicant waits forever.
+
+Without a sweeper the recovery path is "a human notices". In a compliance
+system an application silently stuck for days is a regulatory problem, not just
+poor service.
+
+The sweeper inverts the dependency: rather than trusting the vendor to tell us,
+we periodically ask. Webhooks become an **optimisation** that makes the common
+case fast, while the sweeper is what makes the system **correct**. A useful way
+to think about push versus pull generally: *push for latency, poll for
+correctness.*
+
+Decisions inside it:
+
+**A self-rescheduling job, not a timer in the worker loop.** A timer fires in
+every worker, so the sweep would run once per worker rather than once. As a
+queued job, `FOR UPDATE SKIP LOCKED` already guarantees exactly one claimant,
+the next run is visible in the `jobs` table rather than buried in a process, and
+it survives restarts. A partial unique index keeps at most one sweep queued —
+scoped to `status = 'queued'` only, because the sweeper enqueues its successor
+while still `running`, and a constraint covering `running` would make a
+recurring job unable to schedule its own next run.
+
+**The stuck threshold must exceed the vendor's retry schedule.** Set it below
+and the sweeper races deliveries still in flight, doing work the webhook was
+about to do. Harmless, since both paths are idempotent, but wasteful and
+misleading.
+
+**`started` is excluded.** An application with no verification session is
+waiting on the *applicant*, not the vendor. Chasing those is a reminder email,
+a different job.
+
+### The handler re-fetches rather than trusting the webhook body
+
+A verified signature proves a message is genuine and unaltered. It does not
+make it the authority on the current state — by the time we process it, the
+body may describe a state already superseded.
+
+So the webhook says "something changed" and we then ask the vendor what it is.
+This had a benefit I had not fully anticipated until it showed up in testing:
+because both webhooks in an out-of-order pair re-fetch, both see the *current*
+state, so the second becomes a clean no-change rather than a conflict. Fetching
+largely immunises the system against notification ordering; the recency guard
+then covers the narrower case of two fetches racing each other.
+
+It also means the webhook path and the sweeper path converge on one function.
+That is deliberate: the sweeper exists to be correct when the webhook path
+fails, and two implementations would mean two sets of bugs, with the recovery
+path exercised only during incidents.
+
+### Decisions worth explaining
+
+**Refusals are audited; no-changes are not.** A duplicate delivery that changes
+nothing is the system working normally, and logging it would fill the audit log
+with noise and make a genuinely idempotent handler look busy. But "the vendor
+sent us a verdict and we refused it" is exactly what an auditor asks about
+later, so `vendor_result.refused` records the outcome, the reason, and both
+statuses.
+
+**The web service makes exactly one lifecycle transition** — `started →
+submitted` when a verification session is created — and guards it in the `WHERE`
+clause rather than in TypeScript. Duplicating the state machine in a second
+language would mean two copies of rules that must never disagree. Everything
+vendor-driven goes through `worker/lifecycle.py`.
+
+**The adapter is per-service, not shared.** Phase 3 built a TypeScript adapter
+for creating sessions; this phase builds a Python one for reading results. They
+cannot be shared without inventing the internal API that architecture rule 1
+exists to avoid.
+
+### Things found while building
+
+**`make_interval(mins => …)` takes an integer**, so a fractional value is a type
+error. Switched to `secs =>`, which is double precision and also keeps
+sub-minute intervals usable in demos.
+
+**Next.js answers a trailing slash with a 308.** Didit's documented URL ends in
+one; Next serves the unslashed form. Following the redirect would have worked,
+but the URL convention now lives in each vendor's client, which is what an
+adapter is for.
+
+**The `@/` path alias is a bundler feature.** A module imported by both Next and
+a plain-Node script must use relative imports; `@/lib/db` resolves under Next
+and fails under Node.
+
+**TypeScript cannot check SQL.** A find-and-replace updated a result type to
+`result_at` but missed the `select` clause, which still said `updated_at`. The
+types agreed with themselves and the query returned undefined. Worth
+remembering every time raw SQL looks "obviously fine".
+
+### Evidence
+
+- **Dropped webhook:** the simulator recorded `Approved` and suppressed
+  delivery. The application sat at `submitted` with no `vendor_status`. The
+  sweeper found it, asked the vendor directly, and moved it to `screening` with
+  an audit row reading `"source":"sweeper"` and `"vendor_event_id":null`.
+- **Out of order, recency:** after applying `Approved` at 15:40:40, a `Declined`
+  the vendor reached at 15:40:20 was refused —
+  `stale_result … is older than the last applied result`. The verdict did not
+  regress.
+- **Out of order, legality:** a *newer* `In Review` was refused with
+  `illegal_transition (screening -> checking is not a permitted transition)`.
+  Each guard caught a case the other could not.
+- **Replay after decided:** status, `vendor_status`, `vendor_result_at` and
+  `updated_at` all unchanged; only a refusal row was added.
+- **Happy path:** `started → submitted → checking → screening`, driven entirely
+  by the worker, each transition with its own audit event naming the vendor
+  status and the source.
+- 29 state-machine unit tests, no database or network.

@@ -5,3 +5,8 @@ psycopg[binary]==3.2.3
 # Reads the single root .env so the worker uses the same configuration as
 # /web and docker-compose.
 python-dotenv==1.0.1
+
+# Tests. The lifecycle state machine is pure functions and is the safety-
+# critical part of Phase 4, so it is tested in isolation rather than only
+# through the database.
+pytest==8.3.4

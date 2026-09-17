@@ -208,3 +208,47 @@ they must all be async.
 **PEP / sanctions screening.** See Phase 1 — relevant here because a vendor
 returning "Approved" means the *document check* passed, not that the customer
 may be onboarded. Those are different claims and the system keeps them apart.
+
+## Added in Phase 4
+
+**State machine.** A set of states plus the transitions permitted between them.
+Making the permitted set explicit turns "what should happen next" from a
+judgement each piece of code makes separately into one rule everything shares.
+
+**Lifecycle.** Modelling a case as a position in a process rather than as a
+stored result. Lets you ask "which cases are in a state they should have left by
+now?", which is the question every automated recovery mechanism depends on.
+
+**Terminal state.** One with no outgoing transitions. `decided` is ours: once a
+decision exists, nothing a vendor says afterwards may move the application.
+
+**Out-of-order delivery.** Messages arriving in a different order from the one
+they were sent in. Normal on any network, and guaranteed once retries exist.
+
+**Stale result.** A genuine message describing a state that has since been
+superseded. Correctly signed, correctly formed, and wrong to apply.
+
+**Recency guard.** Comparing the vendor's own timestamp for a result against the
+vendor's timestamp for the last result applied, and ignoring anything older.
+Vendor clock against vendor clock — comparing their event time to our
+observation time mixes two clocks and fails silently under skew.
+
+**Clock skew.** Two machines disagreeing about the time. The reason a guard
+built on someone else's clock is a weaker guarantee than one built on rules you
+control.
+
+**Sweeper (reconciliation job).** A periodic job that compares what we believe
+against what a third party knows, and repairs the difference. It exists because
+webhooks are a delivery attempt, not a guarantee.
+
+**Push versus pull.** Push (webhooks) is fast but unreliable. Pull (the sweeper)
+is slow but complete. Systems that need both use push for latency and poll for
+correctness.
+
+**Adapter.** A single interface with one implementation per external provider,
+so the code that uses it never names a vendor. What lets the same handler run
+against a simulator and a real API.
+
+**Reconciliation.** Generally, the practice of periodically checking your own
+records against an external source of truth. Ubiquitous in finance — this is a
+small version of what payment firms do against their bank statements nightly.

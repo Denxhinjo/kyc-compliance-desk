@@ -229,3 +229,30 @@ h2 { font-size: 17px; margin: 34px 0 4px; }
 @media (max-width: 560px) {
   .field-row { grid-template-columns: 1fr; }
 }
+
+/* --- Phase 4: the simulator's dropped-delivery switch ---------------------- */
+
+.drop-toggle {
+  align-items: flex-start;
+  background: #1a1410;
+  border: 1px solid #4a3a22;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 12px 14px;
+}
+.drop-toggle input { margin-top: 3px; }
+.drop-toggle strong { display: block; font-size: 13.5px; }
+.drop-toggle em { color: var(--muted); display: block; font-size: 12.5px; font-style: normal; margin-top: 2px; }
+
+.banner-warn {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 6px;
+  color: var(--warn-text);
+  font-size: 13px;
+  margin: 0 0 18px;
+  padding: 10px 12px;
+}

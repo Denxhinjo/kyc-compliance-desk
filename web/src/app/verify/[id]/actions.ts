@@ -36,12 +36,26 @@ export async function startVerification(
   }
 
   await withTransaction(async (client) => {
-    await client.query(
+    // The web service makes exactly ONE lifecycle transition, and guards it in
+    // the WHERE clause: this can only ever move an application forward out of
+    // 'started'. Every vendor-driven transition goes through the state machine
+    // in worker/lifecycle.py instead — duplicating that machine in TypeScript
+    // would mean two copies of the rules that must never disagree.
+    const moved = await client.query(
       `update applications
-          set vendor_applicant_id = $1
-        where id = $2`,
+          set status = 'submitted', vendor_applicant_id = $1
+        where id = $2 and status = 'started'`,
       [session.sessionId, applicationId],
     );
+
+    // If it was not in 'started' the session id still needs recording, but the
+    // status is someone else's to change.
+    if (moved.rowCount === 0) {
+      await client.query(
+        `update applications set vendor_applicant_id = $1 where id = $2`,
+        [session.sessionId, applicationId],
+      );
+    }
 
     await logEvent(client, {
       applicationId,
@@ -51,6 +65,7 @@ export async function startVerification(
         vendor: "didit",
         session_id: session.sessionId,
         vendor_status: session.status,
+        status_to: moved.rowCount === 1 ? "submitted" : null,
       },
     });
   });

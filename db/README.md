@@ -39,6 +39,10 @@ Migrations arrive in Phase 1.
 | `007_decisions_allow_referred.sql` | Adds `referred` as an outcome; swaps the unique index for a partial one covering terminal verdicts only. |
 | `008_jobs.sql` | The job queue: the only channel between the two services. |
 | `009_vendor_didit.sql` | Switches the default vendor to Didit. Sumsub needed a business account. |
+| `010_vendor_result_tracking.sql` | `vendor_result_at` and `vendor_status`: the recency half of the late-result guard. |
+| `011_recurring_jobs.sql` | Partial unique index so a job can reschedule itself without ever queueing twice. |
+| `012_mock_vendor_sessions.sql` | Simulator scaffolding. Not part of the domain model. |
+| `013_mock_vendor_result_at.sql` | Simulator scaffolding: a controllable vendor-side result timestamp. |
 
 ## The runner
 

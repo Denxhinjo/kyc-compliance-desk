@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "smoke:audit": "node --experimental-strip-types --no-warnings scripts/smoke-audit.ts",
     "enqueue": "node --experimental-strip-types --no-warnings scripts/enqueue-demo-jobs.ts",
-    "webhook": "node --experimental-strip-types --no-warnings scripts/replay-webhook.ts"
+    "webhook": "node --experimental-strip-types --no-warnings scripts/replay-webhook.ts",
+    "demo": "node --experimental-strip-types --no-warnings scripts/demo-flow.ts"
   },
   "dependencies": {
     "next": "15.5.4",
