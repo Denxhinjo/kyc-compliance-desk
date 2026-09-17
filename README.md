@@ -61,4 +61,13 @@ inventory of every variable.
 
 ## Status
 
-Phase 0 complete — foundations. Both services connect to Postgres.
+Phase 2 complete. Both services connect to Postgres; the schema and the
+append-only audit log are in place; the job queue works and has been proved
+safe under two concurrent workers.
+
+```bash
+python db/migrate.py up                     # apply the schema
+
+cd web  && npm run enqueue -- --count 100   # put work on the queue
+cd worker && .venv/Scripts/python main.py   # consume it (run several)
+```

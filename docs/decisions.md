@@ -273,3 +273,175 @@ reasoning, and it is worth paying.
 **Verified:** a referral inserts; a second referral inserts; a verdict inserts;
 a second verdict is refused by the partial index; `'escalated'` is still refused
 by the CHECK constraint.
+
+---
+
+## Phase 2 — The job queue
+
+### What we built
+
+A `jobs` table, `enqueueJob()` in TypeScript, and a Python worker that claims
+work with `FOR UPDATE SKIP LOCKED`, retries with exponential backoff and
+jitter, parks jobs that cannot succeed, and reclaims work abandoned by a worker
+that died.
+
+### `FOR UPDATE SKIP LOCKED`
+
+Start with the version everybody writes first:
+
+```sql
+select id from jobs where status = 'queued' limit 1;   -- both workers see job 7
+update jobs set status = 'running' where id = 7;       -- both proceed
+```
+
+Two workers run this microseconds apart, both `SELECT` before either `UPDATE`,
+and both process job 7. The applicant is screened twice and two decisions are
+written. In a system that moves money, this is how a payment gets sent twice.
+The dangerous part is that it is *rare* — it works on a laptop and fails in
+production under load.
+
+`FOR UPDATE` takes a row-level lock, which fixes correctness and destroys
+throughput: a second worker reaching the same row **blocks** until the first
+commits. Ten workers then have the throughput of one.
+
+`SKIP LOCKED` changes exactly one thing — a locked row is treated as though it
+were not there. Worker B reaches job 7, sees it locked, and moves straight on
+to job 8. Three workers hitting the queue simultaneously get three different
+jobs and none of them waits.
+
+What makes it airtight is that the exclusion is enforced by Postgres' lock
+manager rather than by application logic. There is no window between checking
+and setting, because there is no checking.
+
+The `LIMIT 1` sits *inside* the locking sub-select deliberately: `SKIP LOCKED`
+is applied during the scan, so Postgres keeps walking past locked rows until it
+finds a free one. Put the limit outside and a busy first row yields "no work
+available" when there is plenty.
+
+**We measured the counterfactual rather than asserting it.** Same 200 jobs, two
+workers, claiming without a lock: **380 executions of 200 jobs — 180 of them
+ran twice.** One job was executed by both workers 8ms apart. With
+`SKIP LOCKED`: 2,200 executions, 2,200 distinct jobs, zero duplicates.
+
+### Why a database table is a legitimate queue
+
+The real argument is not "one less service to run". It is **transactional
+enqueue**.
+
+If the queue were Redis and the data Postgres, this has a hole in it:
+
+```
+insert the vendor_event row      (Postgres)
+enqueue a job                    (Redis)
+```
+
+Crash between those two lines and you have either a stored event nobody will
+process, or a job pointing at a row that does not exist. **There is no ordering
+of those two statements that is correct.** The usual fixes — the outbox
+pattern, two-phase commit — are more machinery than the problem.
+
+With the queue in Postgres it is one transaction, and either both happened or
+neither did. Architecture rule 1 (the two services never call each other) is
+what makes this possible: there is no synchronous handoff to get wrong.
+
+### When it stops being a legitimate queue
+
+Honest limits, because a portfolio piece that claims a design has no downsides
+is not credible:
+
+1. **Every claim is a write.** Claiming `UPDATE`s a row, which writes WAL and
+   leaves a dead tuple. At thousands of jobs/sec you are spending database
+   capacity and vacuum pressure on queue mechanics instead of on users.
+2. **Polling trades latency for load.** We poll every second, so a job can wait
+   a second. The fix is `LISTEN`/`NOTIFY`, and it is deliberately not here.
+3. **Bloat.** Completed jobs accumulate; every status change leaves a dead
+   tuple. This needs a retention policy and **this phase does not implement
+   one**.
+4. **Concurrency is bounded by connections.** A worker holds a connection for
+   the length of a job, and Postgres tops out in the low hundreds without a
+   pooler.
+5. **It is a work queue, not a message bus.** One consumer per message, no
+   fan-out, no replay, no topics.
+
+In one sentence: **when the queue's own traffic starts competing with your
+users' queries, move it out.** For a KYC pipeline doing thousands of
+applications a day, that is not close.
+
+### Why not Redis, Celery or pg-boss
+
+| Rejected | Why |
+| --- | --- |
+| Redis + a worker | The transactional-enqueue hole above, plus a second datastore to run, monitor, back up and secure — and Redis' default durability will lose jobs on a hard restart. |
+| Celery | Needs a broker anyway, so it inherits Redis' problems, and adds a result backend and a large config surface. Worse, it *hides the mechanics* — you would have a working queue you could not explain. |
+| pg-boss | Genuinely the right idea and does this well, but it is **Node-only** and our consumer is Python. The queue schema would be owned and migrated by a JavaScript library that the Python service would have to reverse-engineer — exactly what `/db` exists to prevent. |
+
+pg-boss is what to reach for in a Node-only shop. Two languages sharing one
+database is what rules it out here.
+
+### Decisions worth explaining
+
+**`attempts` increments at CLAIM time, not at failure time.** If a job kills
+the worker outright — OOM, segfault, power loss — no failure handler ever runs.
+Counting at failure time would retry such a job forever, killing every worker
+that touches it. Counting at claim time means a poison pill parks itself.
+
+**There is no `failed` status.** A failure is either "try again later" (back to
+`queued` with `run_after` in the future) or "stop trying" (`parked`). A
+permanent `failed` state would be a bin nobody looks in. `parked` is a dead
+letter queue: work set aside for a human once automatic recovery is exhausted.
+
+**A partial index on `status = 'queued'`.** Done jobs become the overwhelming
+majority of the table and are never claimed, so keeping them out of the claim
+index keeps it small enough to stay in memory. Same technique as the partial
+unique index on `decisions`.
+
+**Equal jitter on backoff.** Exponential because hammering a service that is
+down makes its outage longer. Jittered because otherwise a hundred jobs that
+failed during one outage all retry at the same instant when it ends — a
+thundering herd that can knock over the service that just recovered. Half the
+delay fixed (so backoff still grows), half random (so the herd spreads).
+
+**A stale-job reaper.** The cost of incrementing attempts at claim time is that
+a crashed worker leaves its job `running` forever. Anything `running` past a
+timeout goes back to `queued`, or straight to `parked` if its attempts are
+already exhausted. Without this the retry design has no ending. The timeout
+must exceed the slowest legitimate job — set it too low and it reclaims work
+that is still in progress, causing exactly the double-processing the lock
+prevents.
+
+**`PermanentError`.** A malformed payload will not fix itself on attempt five.
+Handlers can park a job immediately rather than burning retries and an hour of
+backoff on something that can never succeed.
+
+### Exactly-once does not exist
+
+A handler calls a vendor API and then marks the job done. Those cannot be one
+atomic operation, because an HTTP request cannot be rolled back. If the process
+dies in between, the job runs again.
+
+No configuration fixes this. It is a property of distributed systems, not a gap
+in the library. What you get is **at-least-once delivery**, and the obligation
+that follows is that **handlers must be idempotent** — safe to run twice. Same
+word, same idea, arriving from the other direction as the duplicate-webhook
+handling in Phase 3.
+
+So the structure is: the handler's *database* writes and the "mark done" update
+share one transaction; external I/O sits outside it and is assumed repeatable.
+
+### Evidence
+
+- 2,000 jobs, two workers started at the same instant, both working the full 26
+  seconds (998 / 1,002 split). **2,200 execution events, 2,200 distinct jobs,
+  zero processed twice.**
+- The same test with locking removed: 380 executions of 200 jobs, 180 duplicated.
+- Backoff observed: 4.3s then 8.0s (base 5s, equal jitter), then success on
+  attempt 3.
+- A poison job parked after 3/3 attempts with its error retained; a permanent
+  error parked on attempt 1 without burning retries.
+- Two abandoned `running` jobs reclaimed: one requeued and completed on attempt
+  2, one parked because its attempts were already exhausted.
+- A rolled-back transaction left no application, no audit event and no job.
+
+The concurrency proof counts rows in `audit_events`, which rejects `UPDATE` and
+`DELETE` at the database level. The evidence sits in a table that cannot be
+massaged after the fact.

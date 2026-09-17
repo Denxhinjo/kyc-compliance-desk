@@ -37,6 +37,7 @@ Migrations arrive in Phase 1.
 | `005_audit_events.sql` | The append-only story of every state change. |
 | `006_audit_events_append_only.sql` | The triggers that make "append-only" true. |
 | `007_decisions_allow_referred.sql` | Adds `referred` as an outcome; swaps the unique index for a partial one covering terminal verdicts only. |
+| `008_jobs.sql` | The job queue: the only channel between the two services. |
 
 ## The runner
 

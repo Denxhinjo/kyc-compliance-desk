@@ -107,3 +107,56 @@ leaving the database and the repository disagreeing.
 **Partial index.** An index covering only the rows that match a `WHERE` clause.
 A partial *unique* index enforces uniqueness over just that subset — which is
 how `decisions` allows many referrals but only one terminal verdict per case.
+
+## Added in Phase 2
+
+**Race condition.** A bug where the result depends on the exact timing of two
+things happening at once. Dangerous because it is usually rare: it passes every
+test and fails in production under load.
+
+**Row-level lock (`FOR UPDATE`).** Claiming a row so no other transaction can
+change it until yours commits. Other transactions that want the same row wait.
+
+**`SKIP LOCKED`.** An addition to `FOR UPDATE` telling Postgres to ignore rows
+that are already locked rather than waiting for them. It is what turns a table
+into a queue that many workers can share.
+
+**Transactional enqueue.** Inserting a job in the same database transaction as
+the data it refers to, so the two can never come apart. The main reason the
+queue lives in Postgres rather than in Redis.
+
+**Exponential backoff.** Waiting longer after each successive failure — 5s,
+10s, 20s — so that retrying a service that is down does not make its outage
+worse.
+
+**Jitter.** A random wobble added to a retry delay. Without it, everything that
+failed during one outage retries at the same instant when it ends.
+
+**Thundering herd.** The resulting stampede, which can knock over the service
+that had just recovered.
+
+**Dead letter queue.** Where work goes after automatic recovery has been
+exhausted, so a human can look at it. Our `parked` status.
+
+**Poison pill.** A job that reliably crashes whatever processes it. Counting
+attempts at claim time rather than at failure time is what stops one from
+killing every worker in turn, forever.
+
+**At-least-once delivery.** The guarantee you actually get from any queue: a
+job may run more than once. Exactly-once does not exist across a process
+boundary, because external side effects cannot be rolled back.
+
+**Idempotent.** Safe to do twice with the same result as doing it once. The
+obligation that at-least-once delivery places on every handler.
+
+**WAL — write-ahead log.** Postgres records every change here before applying
+it. Relevant because each job claim is a write, so a very high-throughput queue
+burns real database capacity.
+
+**Dead tuple.** The old version of a row left behind by an `UPDATE`, cleaned up
+later by vacuum. Queue tables generate many, which is one of the honest limits
+of using a table as a queue.
+
+**`LISTEN`/`NOTIFY`.** Postgres' built-in publish/subscribe, which would let
+workers be woken instantly instead of polling. The upgrade path when polling
+latency starts to matter.
