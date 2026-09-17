@@ -33,9 +33,10 @@ Migrations arrive in Phase 1.
 | `001_applications.sql` | The case file: applicant details, lifecycle status, risk score. |
 | `002_vendor_events.sql` | The postbox: raw vendor webhooks, with the idempotency key. |
 | `003_screening_results.sql` | One row per sanctions/PEP match, with match strength. |
-| `004_decisions.sql` | Terminal outcomes only, with a mandatory written reason. |
+| `004_decisions.sql` | Outcomes with a mandatory written reason. Its header comment says terminal outcomes only; **superseded by 007**. |
 | `005_audit_events.sql` | The append-only story of every state change. |
 | `006_audit_events_append_only.sql` | The triggers that make "append-only" true. |
+| `007_decisions_allow_referred.sql` | Adds `referred` as an outcome; swaps the unique index for a partial one covering terminal verdicts only. |
 
 ## The runner
 

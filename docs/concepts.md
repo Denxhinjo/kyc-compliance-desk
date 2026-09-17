@@ -103,3 +103,7 @@ affects no rows. The append-only triggers are statement-level so that a
 **Migration checksum.** A hash of a migration file recorded when it is applied,
 so that editing an already-applied migration is detected instead of silently
 leaving the database and the repository disagreeing.
+
+**Partial index.** An index covering only the rows that match a `WHERE` clause.
+A partial *unique* index enforces uniqueness over just that subset — which is
+how `decisions` allows many referrals but only one terminal verdict per case.

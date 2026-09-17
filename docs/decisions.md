@@ -229,3 +229,47 @@ caught it was querying the database from a separate connection afterwards.
 - Six constraint violations refused: unknown status, lowercase country code,
   blank decision reason, second decision on one application, duplicate vendor
   event id, screening score above 100.
+
+### Addendum: `referred` is a decision after all (migration 007)
+
+The original design held only terminal outcomes in `decisions`, on the grounds
+that "what was decided?" should have one answer. Reconsidered and reversed:
+routing a case to a human **is** a decision. The system judged that it would
+not decide, and that judgement has an author, a reason and a risk score — which
+is precisely what this table exists to hold. Losing it to a status change would
+throw away the "why" and keep only the "where".
+
+`004_decisions.sql` was not edited. It is already applied and its checksum is
+recorded; editing it is how a database and a repository start silently
+disagreeing. The schema's history follows the same rule as the audit log — you
+correct it by adding, never by rewriting. So the header comment in `004` is now
+superseded by `007`, and `007` says so explicitly. A reader following the
+migrations in order sees the reasoning change, which is more honest than a
+repository that pretends the first decision was never made.
+
+**The consequence that mattered.** A referred case now gets two rows — the
+system's referral, then the human's verdict — so `one decision per application`
+could no longer be true. Rather than drop that guarantee entirely, the unique
+index was replaced with a **partial unique index**: one that applies only to
+rows matching a `WHERE` clause.
+
+```sql
+create unique index decisions_one_terminal_per_application
+    on decisions (application_id)
+    where outcome in ('approved', 'rejected');
+```
+
+Any number of referrals, but still exactly one terminal verdict per case. That
+is the guarantee actually worth keeping. Referrals are deliberately left
+unconstrained, because a re-screened case could legitimately be referred more
+than once, and `audit_events` records each in order.
+
+The cost, stated plainly: queries asking for "the decision" must now say which
+kind they mean. `where outcome in ('approved','rejected')` gets the verdict;
+without it, a referral can come back instead — a decision about process rather
+than about the applicant. That filter is the price of keeping the referral's
+reasoning, and it is worth paying.
+
+**Verified:** a referral inserts; a second referral inserts; a verdict inserts;
+a second verdict is refused by the partial index; `'escalated'` is still refused
+by the CHECK constraint.
