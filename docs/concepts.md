@@ -252,3 +252,76 @@ against a simulator and a real API.
 **Reconciliation.** Generally, the practice of periodically checking your own
 records against an external source of truth. Ubiquitous in finance — this is a
 small version of what payment firms do against their bank statements nightly.
+
+## Added in Phase 5
+
+**SDN — Specially Designated Nationals.** The US Treasury's sanctions list.
+Public domain, since it is a work of the US Government, and the list with the
+most legal force behind it worldwide.
+
+**FATF — Financial Action Task Force.** The intergovernmental body that
+publishes the two country lists everyone screens against: "high-risk
+jurisdictions subject to a call for action" (the severe list) and "jurisdictions
+under increased monitoring" (the grey list).
+
+**De-risking.** Refusing or dropping whole categories of customer — PEPs, or
+everyone from a particular country — rather than assessing them individually.
+Cheaper than doing the work, and something regulators criticise, because it
+pushes people out of the banking system altogether.
+
+**Enhanced due diligence (EDD).** The extra work the law requires for
+higher-risk customers: senior sign-off, establishing source of wealth, ongoing
+monitoring. What a PEP match triggers. Not refusal.
+
+**Strict liability.** Liability without needing to prove intent. Sanctions
+breaches are strict-liability offences, which is why "we assessed the risk and
+proceeded" is not a defence.
+
+**Fuzzy matching.** Comparing strings by similarity rather than equality,
+returning a strength rather than yes/no.
+
+**Transliteration.** Writing a name from one script in another. There is often
+no single correct answer — محمد is legitimately Mohammed, Muhammad, Mohamed or
+Mohammad — which is the root cause of most name-matching difficulty.
+
+**Patronymic.** A name element derived from the father's name: Russian
+*Vladimirovich*, Icelandic *-son* / *-dóttir*. Present or absent depending on
+which document you are reading, so it must not break a match.
+
+**AKA / alias.** Alternative spellings the list itself publishes. More valuable
+than any threshold: a transliteration pair that scores 80 by string similarity
+becomes an exact match if the list carries both spellings.
+
+**token_set_ratio.** A scorer that ignores word order and extra words. Handles
+"Xi Jinping" against "Jinping Xi" — and returns 100 whenever one name's words
+are a subset of the other's, which is how a list entry reading "KHAN" comes to
+match "Sarah Khan".
+
+**Token alignment.** Requiring that a minimum number of name *parts* correspond
+before two names are considered a candidate pair at all. The fix for the
+containment problem above, and roughly how a person compares two names.
+
+**Noise floor.** The similarity below which a pair is not recorded at all. Not a
+decision threshold: everything above it is recorded, and what each band is
+*worth* is decided separately.
+
+**False positive / false negative, asymmetrically.** A false negative here is a
+missed sanctions match — a regulatory breach. A false positive is a real
+customer turned away and an officer's hour burned. Both are costly; only one is
+a criminal offence, and that asymmetry decides every threshold in this phase.
+
+**Recall.** The proportion of genuine matches actually caught. The number that
+matters most, and the one a tidy-looking approve/review/reject split hides.
+
+**Pure function.** One whose output depends only on its arguments, with no
+side effects — no database, no network, no clock. Makes results deterministic,
+reproducible and testable without fixtures.
+
+**Points-based scoring (rules engine).** Adding up explicit, individually
+justifiable signals to reach a score, as opposed to a model. Chosen here
+because the output must be an argument a human and a regulator can follow,
+not a prediction.
+
+**Ruleset version.** A label stored with every score identifying which version
+of the rules produced it, so an old decision can be reproduced after the rules
+change.

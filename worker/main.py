@@ -24,6 +24,7 @@ import psycopg
 # "imported but unused" — the import IS the use.
 import handlers  # noqa: F401
 import result_handler  # noqa: F401
+import screening_handler  # noqa: F401
 import sweeper  # noqa: F401
 from config import (
     POLL_SECONDS,

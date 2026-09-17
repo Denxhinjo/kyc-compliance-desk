@@ -106,8 +106,10 @@ security bug. Raw bytes have exactly one interpretation.
 
 ## Status
 
-Phase 4 complete. An applicant can fill in the form, complete identity
-verification, and watch the application move through its lifecycle on its own.
+Phase 5 complete. An applicant can fill in the form, complete identity
+verification, and watch the application move through its lifecycle on its own —
+then be screened against a real sanctions list, scored, and either
+auto-approved, auto-rejected or referred to a human with written reasons.
 Results are applied through a vendor-neutral adapter and guarded by an explicit
 state machine, so duplicate, late and out-of-order deliveries are harmless. A
 sweeper reconciles anything the vendor never managed to tell us.
@@ -145,8 +147,32 @@ applications waiting longer than they should and asks the vendor directly.
 Webhooks are the optimisation; the sweeper is what makes the system correct.
 Push for latency, poll for correctness.
 
+### Sanctions screening and risk scoring
+
+Screening runs against one of three sources, chosen by `SANCTIONS_SOURCE`:
+
+| Source | Licence | Role |
+| --- | --- | --- |
+| `synthetic` | fabricated, committed | works offline on a fresh clone; no licence question |
+| `ofac` | **public domain** (US Government work, 17 U.S.C. 105) | real data, 19,385 entries; `python scripts/download_ofac.py` |
+| `opensanctions` | CC-BY-NC — commercial use needs a licence | supported, documented, deliberately not shipped |
+
+Risk scoring lives in [worker/scoring.py](worker/scoring.py) as **pure
+functions**: no database, no network, no clock. Every score carries the signals
+that produced it, and the thresholds in force are stored alongside, so a
+decision stays explainable after the rules change.
+
+**No single signal can auto-reject.** Measured against the real OFAC list,
+0.58% of applicants on no list at all reached the top match band purely by
+having a common name — `Carlos Garcia` against `Carlos Alberto GAXIOLA GARCIA`.
+Refusing those automatically would mean 580 wrongly rejected customers per
+100,000. A name match now guarantees review; refusal needs a second independent
+signal. Recall was unaffected. The full argument, with numbers in both
+directions, is in [docs/decisions.md](docs/decisions.md).
+
 ```bash
-cd worker && .venv/Scripts/python -m pytest    # state machine tests
+cd worker && .venv/Scripts/python -m pytest    # 121 tests, no database needed
+.venv/Scripts/python analyse_distribution.py --count 2000 --source ofac
 
 cd web
 npm run demo -- new                            # an applicant + a session

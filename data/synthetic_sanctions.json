@@ -1,0 +1,259 @@
+{
+  "_README": [
+    "FABRICATED DATA. Every person and organisation in this file is invented.",
+    "Any resemblance to a real individual is coincidental and unintended.",
+    "",
+    "This exists so that `git clone && pytest` works offline with no downloads",
+    "and no licensing question. It is not a sanctions list and must never be",
+    "used as one.",
+    "",
+    "For real data:",
+    "  scripts/download_ofac.py  - OFAC SDN, a US Government work and therefore",
+    "                              public domain (17 U.S.C. 105). Free to use",
+    "                              and redistribute.",
+    "  OpenSanctions             - richer and better structured, but CC-BY-NC.",
+    "                              Commercial use needs a paid licence, so it is",
+    "                              supported and not shipped.",
+    "",
+    "Entries below are chosen to exercise the cases that make name matching",
+    "hard: transliteration, name order, patronymics, common names, and dates of",
+    "birth that contradict an otherwise convincing name match."
+  ],
+  "source": "synthetic",
+  "generated_note": "Fabricated for demonstration. Not a sanctions list.",
+  "entries": [
+    {
+      "entity_id": "SYN-0001",
+      "name": "Ahmad Hasan",
+      "aliases": ["Ahmed Hassan Mahmoud", "A. Hasan"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["EG"],
+      "date_of_birth": "1975-04-12",
+      "_why": "Transliteration. Scores 87 against 'Ahmed Hassan' - a true match sitting in the band no threshold resolves cleanly."
+    },
+    {
+      "entity_id": "SYN-0002",
+      "name": "Sergei Ivanoff",
+      "aliases": ["Sergey Ivanov", "Sergey Petrovich Ivanov"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["RU"],
+      "date_of_birth": "1968-11-30",
+      "_why": "Cyrillic transliteration plus a patronymic. The alias is what rescues it."
+    },
+    {
+      "entity_id": "SYN-0003",
+      "name": "Jinping Xu",
+      "aliases": ["Xu Jinping"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["CN"],
+      "date_of_birth": "1960-06-15",
+      "_why": "Family name first. token_set_ratio handles the reordering; plain ratio does not."
+    },
+    {
+      "entity_id": "SYN-0004",
+      "name": "Jose Munoz Delgado",
+      "aliases": ["José Muñoz Delgado"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["VE"],
+      "date_of_birth": "1981-02-28",
+      "_why": "Diacritics. Normalisation takes this from 80 to 100."
+    },
+    {
+      "entity_id": "SYN-0005",
+      "name": "Fatima Al-Rashid",
+      "aliases": ["Fatimah Alrashid", "Fatima Alrashid"],
+      "list_name": "SYNTHETIC-PEP",
+      "entity_type": "pep",
+      "countries": ["AE"],
+      "date_of_birth": "1962-09-03",
+      "_why": "A PEP, not a sanctions target. Must route to review, never to rejection. Date of birth deliberately differs from the demo applicant of the same name, so the conflict signal is exercised."
+    },
+    {
+      "entity_id": "SYN-0006",
+      "name": "Elena Vasquez Moreno",
+      "aliases": ["Elena Vazquez"],
+      "list_name": "SYNTHETIC-PEP",
+      "entity_type": "pep",
+      "countries": ["ES"],
+      "date_of_birth": "1992-07-21",
+      "_why": "PEP whose date of birth AGREES with a demo applicant - agreement is weak evidence, and the scoring must not treat it as confirmation."
+    },
+    {
+      "entity_id": "SYN-0007",
+      "name": "Tomas Novak",
+      "aliases": ["Tomáš Novák"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["CZ"],
+      "date_of_birth": "1944-01-01",
+      "_why": "Extremely common Czech name plus a date of birth forty years off the demo applicant's. The case where a 100-point name match should still not convict."
+    },
+    {
+      "entity_id": "SYN-0008",
+      "name": "Muhammad Al Sayyid",
+      "aliases": ["Mohammed Al-Sayed", "Mohamed Elsayed"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["SY"],
+      "date_of_birth": "1979-05-20",
+      "_why": "The pair that scores only 80 on string similarity. Present as aliases precisely to show that the list's own spellings beat any threshold."
+    },
+    {
+      "entity_id": "SYN-0009",
+      "name": "Viktor Kozlov",
+      "aliases": ["Victor Kozlow"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["BY"],
+      "date_of_birth": "1971-03-08"
+    },
+    {
+      "entity_id": "SYN-0010",
+      "name": "Amara Diallo",
+      "aliases": ["Amara Diallo Sow"],
+      "list_name": "SYNTHETIC-PEP",
+      "entity_type": "pep",
+      "countries": ["ML"],
+      "date_of_birth": "1985-12-11"
+    },
+    {
+      "entity_id": "SYN-0011",
+      "name": "Nguyen Van Minh",
+      "aliases": ["Minh Van Nguyen"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["VN"],
+      "date_of_birth": "1977-08-19"
+    },
+    {
+      "entity_id": "SYN-0012",
+      "name": "Rashid Karimov",
+      "aliases": ["Rasheed Karimoff"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["UZ"],
+      "date_of_birth": "1983-10-02"
+    },
+    {
+      "entity_id": "SYN-0013",
+      "name": "Grigori Petrov",
+      "aliases": ["Gregory Petroff", "Grigory Petrov"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["RU"],
+      "date_of_birth": "1959-04-25"
+    },
+    {
+      "entity_id": "SYN-0014",
+      "name": "Ingrid Larsson",
+      "aliases": ["Ingrid Larson"],
+      "list_name": "SYNTHETIC-PEP",
+      "entity_type": "pep",
+      "countries": ["SE"],
+      "date_of_birth": "1970-06-30"
+    },
+    {
+      "entity_id": "SYN-0015",
+      "name": "Omar Benali",
+      "aliases": ["Omar Ben Ali", "Oumar Benali"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["DZ"],
+      "date_of_birth": "1988-01-17"
+    },
+    {
+      "entity_id": "SYN-0016",
+      "name": "Chinedu Okafor",
+      "aliases": ["Chinedu Okonkwo Okafor"],
+      "list_name": "SYNTHETIC-PEP",
+      "entity_type": "pep",
+      "countries": ["NG"],
+      "date_of_birth": "1974-02-09"
+    },
+    {
+      "entity_id": "SYN-0017",
+      "name": "Marek Kowalski",
+      "aliases": ["Marek Kowalsky"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["PL"],
+      "date_of_birth": "1966-09-14"
+    },
+    {
+      "entity_id": "SYN-0018",
+      "name": "Layla Haddad",
+      "aliases": ["Leila Haddad", "Laila Hadad"],
+      "list_name": "SYNTHETIC-PEP",
+      "entity_type": "pep",
+      "countries": ["LB"],
+      "date_of_birth": "1990-11-05"
+    },
+    {
+      "entity_id": "SYN-0019",
+      "name": "Dmitri Sokolov",
+      "aliases": ["Dmitry Sokoloff"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["RU"],
+      "date_of_birth": "1980-07-23"
+    },
+    {
+      "entity_id": "SYN-0020",
+      "name": "Priya Raghunathan",
+      "aliases": ["Priya Raghunath"],
+      "list_name": "SYNTHETIC-PEP",
+      "entity_type": "pep",
+      "countries": ["IN"],
+      "date_of_birth": "1986-03-31"
+    },
+    {
+      "entity_id": "SYN-0021",
+      "name": "Ibrahim Traore Diakite",
+      "aliases": ["Ibrahim Traoré"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["BF"],
+      "date_of_birth": "1987-05-06"
+    },
+    {
+      "entity_id": "SYN-0022",
+      "name": "Hassan Mahmoud Nasser",
+      "aliases": ["Hasan Mahmud Naser"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["IR"],
+      "date_of_birth": "1973-12-01"
+    },
+    {
+      "entity_id": "SYN-0023",
+      "name": "Sofia Andersson",
+      "aliases": ["Sofie Anderson"],
+      "list_name": "SYNTHETIC-PEP",
+      "entity_type": "pep",
+      "countries": ["NO"],
+      "date_of_birth": "1995-08-08"
+    },
+    {
+      "entity_id": "SYN-0024",
+      "name": "Kwame Mensah",
+      "aliases": ["Kwami Mensa"],
+      "list_name": "SYNTHETIC-PEP",
+      "entity_type": "pep",
+      "countries": ["GH"],
+      "date_of_birth": "1969-10-27"
+    },
+    {
+      "entity_id": "SYN-0025",
+      "name": "Zahra Mousavi",
+      "aliases": ["Zara Musavi", "Zahra Moussavi"],
+      "list_name": "SYNTHETIC-SDN",
+      "entity_type": "sanctions",
+      "countries": ["IR"],
+      "date_of_birth": "1984-04-04"
+    }
+  ]
+}

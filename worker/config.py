@@ -76,3 +76,13 @@ SWEEP_STUCK_MINUTES = _float("SWEEP_STUCK_MINUTES", "10")
 # Applications examined per sweep. A cap so one sweep cannot monopolise a worker
 # after an outage has left thousands stuck.
 SWEEP_BATCH_SIZE = _int("SWEEP_BATCH_SIZE", "50")
+
+# --- Screening --------------------------------------------------------------
+
+# 'synthetic' | 'ofac' | 'opensanctions'.
+#
+# synthetic ships in the repository so a fresh clone works offline. ofac is the
+# real US Treasury SDN list, a US Government work and therefore public domain.
+# opensanctions is richer but CC-BY-NC, so commercial use needs a licence and
+# it is deliberately not the default.
+SANCTIONS_SOURCE = os.environ.get("SANCTIONS_SOURCE") or "synthetic"

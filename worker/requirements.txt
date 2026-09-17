@@ -10,3 +10,7 @@ python-dotenv==1.0.1
 # critical part of Phase 4, so it is tested in isolation rather than only
 # through the database.
 pytest==8.3.4
+
+# Fuzzy name matching. C-backed, so a 20,000-entry list is searchable per
+# applicant without a separate search service.
+rapidfuzz==3.14.6

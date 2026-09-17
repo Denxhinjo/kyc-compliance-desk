@@ -869,3 +869,313 @@ remembering every time raw SQL looks "obviously fine".
   by the worker, each transition with its own audit event naming the vendor
   status and the source.
 - 29 state-machine unit tests, no database or network.
+
+---
+
+## Phase 5 — Sanctions screening and risk scoring
+
+### The licensing decision, first
+
+OpenSanctions is the better dataset and it is what a real firm would license.
+It is also **CC-BY-NC**: commercial use requires a paid licence. A portfolio
+project that anyone should be able to clone and run cannot ship it, and a repo
+that quietly downloads non-commercial data on first run is worse, not better.
+
+So three sources behind one interface:
+
+| Source | Licence | Role |
+| --- | --- | --- |
+| `synthetic` | fabricated, committed | `git clone && pytest` works offline with no licence question at all |
+| `ofac` | **public domain** — a US Government work under 17 U.S.C. 105 | the default for real screening; downloaded on demand, gitignored |
+| `opensanctions` | CC-BY-NC | supported, documented, deliberately not shipped |
+
+OFAC's SDN list is also the list with actual legal force behind it. The
+downloader pulled **19,385 entries, 9,971 of them with at least one alias** —
+and the aliases turn out to matter more than any threshold.
+
+### What sanctions lists and PEPs are, legally
+
+**A sanctions list is a government instrument, not a risk signal.** Providing
+funds or services to a listed person is a **criminal offence** — UK Sanctions
+and Anti-Money Laundering Act 2018, US OFAC regulations with strict liability
+and penalties in the millions per violation. There is no "we assessed the risk
+and proceeded".
+
+**A PEP is the opposite kind of thing.** A Politically Exposed Person holds a
+prominent public function, or is close to someone who does. It is **not illegal
+and not grounds for refusal** — refusing PEPs wholesale ("de-risking") is
+something regulators criticise. The law requires **enhanced due diligence**:
+senior sign-off, source-of-wealth checks, ongoing monitoring. Which means a
+human.
+
+Getting these backwards is the classic error: auto-rejecting PEPs (bad, and a
+regulator will ask why) and manually reviewing sanctions hits (worse, because
+you transacted while deciding). The points table encodes the distinction, and a
+test asserts that no PEP signal can ever cause an automatic rejection.
+
+### Why fuzzy name matching is genuinely hard
+
+Measured, not asserted. Normalised, scored as `max(token_set_ratio, ratio)`:
+
+```
+        score  applicant            list entry
+MATCH   100.0  Xi Jinping           Jinping Xi
+MATCH   100.0  Vladimir Putin       Vladimir Vladimirovich Putin
+MATCH   100.0  Jose Munoz           José Muñoz
+MATCH    94.7  John Smith           Jon Smith
+not      91.7  Maria Garcia         Maria Garzia          <- false positive
+MATCH    89.7  O'Brien Patrick      Patrick OBrien
+MATCH    87.0  Ahmed Hassan         Ahmad Hasan
+MATCH    81.5  Sergey Ivanov        Sergei Ivanoff
+not      81.5  Ahmed Hassan         Ahmed Hasan Ali       <- false positive
+MATCH    80.0  Mohammed Al-Sayed    Muhammad Al Sayyid
+not      80.0  Ahmed Hassan         Ahmed Hussein         <- false positive
+not      80.0  John Smith           Jane Smith            <- false positive
+```
+
+**Look at 80.0–81.5.** A true match and three false positives score
+*identically*. There is no threshold that separates them, because **the
+information needed to separate them is not in the strings.**
+
+The specific difficulties:
+
+- **Transliteration.** محمد has no canonical Latin form: Mohammed, Muhammad,
+  Mohamed, Mohammad. `Sergey Ivanov` and `Sergei Ivanoff` are one person and
+  score 81.5.
+- **Name order.** Chinese and Hungarian put the family name first; Spanish uses
+  two surnames; Arabic chains patronymics. `token_set_ratio` handles reordering,
+  which is why Xi Jinping scores 100 — and the same blindness inflates
+  `Ahmed Hasan Ali` to 81.5.
+- **Common names.** `Ahmed Hassan` in Egypt is `John Smith` in England. A 90
+  against a common name carries far less information than a 90 against
+  `Ryszard Wojciechowski`. Real systems weight by name frequency; we do not, and
+  that is a stated limitation.
+- **Diacritics and punctuation** are the easy ones, and normalisation fixes them
+  outright. `José Muñoz` went from 80 to **100**. Preprocessing bought more than
+  any scorer choice did.
+
+### The threshold, and what each direction costs
+
+Measured across those cases:
+
+| Threshold | True matches caught | False positives |
+| --- | --- | --- |
+| 80 | 8 of 8 | **4 of 7** |
+| 85 | 6 of 8 | 1 of 7 |
+| 88 | 5 of 8 | 1 of 7 |
+| 92 | 4 of 8 | 0 of 7 |
+
+At 80 you catch everything and drown. At 92 you are clean and you **miss
+`Ahmed Hassan` against `Ahmad Hasan`** — a textbook transliteration pair.
+
+**So there is no single threshold.** Bands instead:
+
+| Band | Points (sanctions) | Effect |
+| --- | --- | --- |
+| ≥ 92 confirmed | 60 | guarantees review; cannot refuse alone |
+| 85–91 probable | 45 | review |
+| 80–84 weak | 20 | recorded, contributes, never decides |
+| < 80 | — | not recorded |
+
+A single line forces a binary decision on data that cannot support one. Bands
+do not pretend to: the ambiguous range routes to a human, which is what humans
+are for. Everything at or above 80 is written to `screening_results` including
+the weak matches — an officer who cannot see the near-misses cannot judge
+whether the strong one is a coincidence.
+
+### Two bugs the measurements found, both serious
+
+**1. `token_set_ratio` returns 100 for containment.** That is what makes
+`Vladimir Putin` correctly match `Vladimir Vladimirovich Putin`. It also makes
+`Ibrahim Osei` match a list entry reading `DR. IBRAHIM` at **100**, and
+`Sarah Khan` match `KHAN`.
+
+OFAC SDN contains **951 single-token entries**. Against a 400-applicant
+population that one flaw produced a 31.5% confirmed-sanctions rate and a
+**31.8% automatic rejection rate**. It would have refused a third of a real
+customer book, and every rejection would have looked perfectly justified in the
+logs.
+
+**2. The first fix was also wrong.** Requiring one *exactly* shared token
+seemed obvious — and `Ahmed Hassan` and `Ahmad Hasan` share no exact token at
+all, so the headline transliteration case would have been silently discarded.
+
+The rule that works: **at least two name PARTS must correspond**, where parts
+are compared fuzzily at a loose per-token threshold of 70. Loose because
+transliteration lives inside words (`ahmed`/`ahmad` is 80, `mohammed`/`muhammad`
+75, `sayed`/`sayyid` 72) while genuinely different parts score far below
+(`hassan`/`hussein` 46, `john`/`jane` 50). At the token level there is a wide
+gap, precisely because the comparison is not diluted by the parts that do match.
+
+It is also how a human compares two names: sharing a first name is not a match;
+sharing a first name and a surname is. All 14 measured cases come out right,
+including `Mohammed Al-Sayed` against `Muhammad Al Sayyid`, which nothing else
+rescued.
+
+### THE FINDING: auto-rejecting on a name match is wrong
+
+The brief specified <20 approve / 20–79 review / 80+ reject, and asked whether
+that produces a sensible split. The routing thresholds are fine. **The points
+were not**, and the measurement is unambiguous.
+
+With a confirmed sanctions match worth 80 — enough to refuse on its own —
+scored against the real OFAC list over 2,000 synthetic applicants:
+
+```
+1,895 applicants were on no list at all.
+  matched at confirmed    11    0.58%
+  AUTO-REJECTED despite being on no list: 11   (0.58%)
+    'Carlos Garcia'    matched 'Carlos Alberto GAXIOLA GARCIA'
+    'Andrei Petrov'    matched 'Andrei Yuvenalyevich PETROV'
+    'Carlos Fernandez' matched 'Carlos Ariel FERNANDEZ CONCEPCION'
+```
+
+**0.58% of legitimate customers refused by a string comparison.** On a book of
+100,000 that is 580 real people, each with a genuine grievance and no idea why.
+
+So `confirmed` was lowered from 80 to **60**: enough to guarantee review, not
+enough to refuse anyone by itself. Reaching 80 now requires a second
+independent signal — a failed document check, a call-for-action jurisdiction.
+
+The effect, same population and seed:
+
+| | confirmed = 80 | confirmed = 60 |
+| --- | --- | --- |
+| approve | 87.7% | 87.7% |
+| review | 6.8% | **11.6%** |
+| reject | 5.6% | **0.8%** |
+| false auto-rejections | **0.58%** | **0.11%** |
+| recall, exact plants | 100% | 100% |
+| recall, transliterated | 97.0% | 97.0% |
+
+**Recall did not move.** The match is still found, still recorded, still shown
+to an officer. Only the automatic refusal was withdrawn. The cost is review
+volume: 6.8% to 11.6%, roughly one extra case per twenty applicants.
+
+That trade is the right way round. A false negative is a regulatory breach; a
+false positive is an officer's hour. Moving 4.8% of cases from "refused
+automatically" to "looked at by a human" buys a fivefold reduction in wrongly
+refused customers, and the two false rejections that remain both have a second
+independent signal behind them — which is the design working, not failing.
+
+It also matches actual practice. Firms do not refuse customers on a fuzzy name
+match; a potential match is escalated and a human confirms identity before the
+firm acts. **Automated rejection on name similarity alone is not the cautious
+option — it is an untested one.**
+
+A property test now asserts the general rule: no single signal can auto-reject.
+
+### The honest verdict on the split
+
+87.7% / 11.6% / 0.8% is sensible for a consumer book, with these caveats
+stated plainly:
+
+- **The reject rate is inflated by the test population.** Genuine sanctions
+  matches were planted at ~5%; in reality they are well under 0.1%. On a real
+  book the automatic rejection rate would be a small fraction of 0.8%.
+- **Review volume is driven by the document check, not by name matching.**
+  `document_check_declined` and its siblings account for most of the 11.6%.
+  Good matching produces surprisingly little review volume; failed identity
+  verification produces most of it.
+- **Recall on transliterations is 97%, not 100%.** Two of 67 were missed, both
+  two-token names where the single mutated character broke token alignment:
+  `OOO RADIOTEKHSNAB` became `OOu RADIOTEKHSNAB` and `ooo`/`oou` scores 66.7,
+  below the 70 alignment floor, leaving only one aligned part. The two-part rule
+  has no margin on two-part names. Stated rather than smoothed over: **each of
+  those two is a breach.** The mitigation in a real deployment is screening
+  against several lists and on more than the name.
+- **Single-token list entries are not matched at all.** 951 OFAC entries are
+  unmatched by construction. Real systems handle mononyms with passport numbers
+  and dates of birth, which we do not have.
+
+### Why pure functions, concretely
+
+`scoring.py` touches no database, no socket and no clock. Everything arrives as
+an argument, including the thresholds.
+
+The payoff was not theoretical. The entire threshold investigation above —
+2,000 applicants scored against a 19,385-entry list, twice, with different
+points tables — ran in a second with no database, no worker and no queue. Had
+scoring reached into Postgres, that analysis would have needed fixtures,
+teardown and a lot more patience, and I would probably have done less of it and
+found neither bug.
+
+Also: determinism means an old decision can be re-derived rather than merely
+believed, which is what "explain this decision" requires. A clock read inside
+would have made a case score differently on re-run.
+
+### Why points and not a model
+
+Not because a model would score worse — it might well score better. Because of
+what has to happen after the score exists.
+
+- **An officer acts on the reason, not the number.** "Score 65" tells them
+  nothing. "Probable sanctions match at 87, plus a high-risk jurisdiction" tells
+  them what to check first.
+- **A regulator asks why this person was refused.** "The model said so" is not
+  an answer; UK and EU rules on automated decision-making give individuals a
+  right to an explanation and to contest it.
+- **The training data does not exist.** You refuse the risky applicants, so you
+  never learn whether they would have been fine. The feedback loop supervised
+  learning needs is structurally absent.
+- **Proxy discrimination.** A model trained on past decisions learns past bias,
+  and name and nationality are excellent proxies for ethnicity. A points table
+  makes every such input visible and arguable.
+- **Rules change by law, not by retraining.** When FATF adds a country you edit
+  a list and can state exactly which decisions change.
+
+The point is not accuracy. **The output has to be an argument, not a
+prediction.**
+
+### Other decisions
+
+**Strongest hit, never the sum.** Five weak matches against `Ahmed Hassan` are
+evidence that the name is common, not that the person is five times more likely
+to be sanctioned. Summing them would refuse an ordinary applicant for having an
+ordinary name. The count is still reported, worth zero points, because thirty
+weak hits and one hit at 97 are very different situations and the score cannot
+tell them apart.
+
+**A conflicting date of birth downgrades one band** rather than scaling points,
+because the result has to be sayable in a sentence: "the name matched at 93 but
+the listed date of birth is 1944 and this applicant was born in 1983, so it is
+treated as probable rather than confirmed". A multiplier produces a number
+nobody can defend in those terms. The asymmetry is deliberate: a conflict is
+strong evidence of two different people, while agreement is weak evidence of
+one.
+
+**Referral leaves the application in `screening`, not `decided`.** A referral is
+a decision about *process*, not about the applicant, so the case is not decided
+until a human decides it. Phase 6's queue is `screening` plus a `referred`
+decision.
+
+**Automatic decisions justify themselves in words.** `decisions.reason` is
+constrained non-blank, and a row saying only "score 84" would satisfy the
+constraint while defeating its purpose, so the reason is assembled from the
+signal sentences.
+
+**FATF lists live in code, not in a database**, so a change to them is a
+reviewable commit. They carry an "as at" date and a warning to re-check against
+fatf-gafi.org, because they are legal lists with publication dates, not
+constants.
+
+### Evidence
+
+- 121 unit tests, no database and no network: every signal in isolation, both
+  routing boundaries (19/20, 79/80), the band edges, and properties that must
+  survive any change to the rules.
+- The measured name-matching table above, pinned as regression tests — including
+  one whose only job is to fail if someone adds a `decided` shortcut, and one
+  asserting that the bands genuinely overlap.
+- 19,385 real OFAC entries downloaded and screened against.
+- End to end: `Ahmed Hassan` matched `Ahmed Hassan Mahmoud` (an alias of
+  `Ahmad Hasan`) at 100, scored 60, referred to a human with the reason
+  `Risk score 60. Sanctions match against "Ahmed Hassan Mahmoud" on
+  SYNTHETIC-SDN at 100% name similarity (confirmed).`
+- Idempotency: re-running screening left `risk_score`, `risk_scored_at`,
+  `screening_results`, `decisions` and `audit_events` byte-identical —
+  `score unchanged at 60 — nothing rewritten`, `already referred — no second
+  referral`.
+- The stored `risk_signals` blob carries the score, the routing, every signal
+  with its points, its evidence and a human sentence, the thresholds in force
+  and the ruleset version — so the routing is explainable after the bands move.

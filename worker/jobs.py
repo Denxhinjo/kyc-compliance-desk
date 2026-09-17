@@ -282,3 +282,34 @@ def queue_depth(conn: psycopg.Connection) -> dict[str, int]:
     with conn.cursor() as cur:
         cur.execute("select status, count(*) from jobs group by status")
         return {row[0]: row[1] for row in cur.fetchall()}
+
+
+def enqueue_job(
+    conn: psycopg.Connection,
+    job_type: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    run_after_seconds: float = 0.0,
+) -> int:
+    """Put a job on the queue from inside the worker.
+
+    The Python twin of enqueueJob() in web/src/lib/jobs.ts, and it carries the
+    same obligation: it does NOT commit. The caller owns the transaction, so a
+    job is enqueued only if the state change that warranted it also commits.
+    One service should not be able to create work for a row that was rolled
+    back.
+    """
+    from psycopg.types.json import Jsonb
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into jobs (job_type, payload, run_after)
+            values (%s, %s, now() + make_interval(secs => %s))
+            returning id
+            """,
+            (job_type, Jsonb(payload or {}), run_after_seconds),
+        )
+        row = cur.fetchone()
+        assert row is not None
+        return row[0]

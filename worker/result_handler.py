@@ -30,7 +30,7 @@ from psycopg.types.json import Jsonb
 
 from audit import log_event
 from handlers import PermanentError, handler
-from jobs import Job
+from jobs import Job, enqueue_job
 from lifecycle import Evaluation, Outcome, evaluate_vendor_result
 from vendor import VendorError, VerificationResult, get_client
 
@@ -220,6 +220,16 @@ def apply_result(
             "vendor_result_at": result_at.isoformat() if result_at else None,
         },
     )
+    # Reaching 'screening' means the vendor is finished and our own checks
+    # begin. Enqueued in the SAME transaction as the status change, so there is
+    # no state in which an application is screening and nothing is going to
+    # screen it.
+    if evaluation.target == "screening":
+        job_id = enqueue_job(
+            conn, "screening.run", {"application_id": str(application["id"])}
+        )
+        log.info("queued screening job %s for application %s", job_id, application["id"])
+
     log.info(
         "application %s: %s -> %s (vendor %s, via %s)",
         application["id"],

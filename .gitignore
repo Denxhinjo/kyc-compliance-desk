@@ -18,6 +18,11 @@ __pycache__/
 venv/
 .pytest_cache/
 
+# Downloaded sanctions data. The synthetic fixture IS committed; real list
+# data is fetched on demand and never checked in.
+data/ofac_sdn.json
+data/opensanctions.json
+
 # OS / editor
 .DS_Store
 Thumbs.db

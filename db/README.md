@@ -43,6 +43,7 @@ Migrations arrive in Phase 1.
 | `011_recurring_jobs.sql` | Partial unique index so a job can reschedule itself without ever queueing twice. |
 | `012_mock_vendor_sessions.sql` | Simulator scaffolding. Not part of the domain model. |
 | `013_mock_vendor_result_at.sql` | Simulator scaffolding: a controllable vendor-side result timestamp. |
+| `014_risk_scoring.sql` | `risk_signals`, `risk_scored_at`, `risk_ruleset_version`, and a unique index making screening re-runnable. |
 
 ## The runner
 
