@@ -1179,3 +1179,222 @@ constants.
 - The stored `risk_signals` blob carries the score, the routing, every signal
   with its points, its evidence and a human sentence, the thresholds in force
   and the ruleset version — so the routing is explainable after the bands move.
+
+---
+
+## Phase 6 — The compliance review desk
+
+### What the officer is actually doing
+
+Not "reviewing an application". Answering one question: **is this the person on
+the list, or someone who shares their name?**
+
+That is almost the whole job. Phase 5 found that `Carlos Garcia` matches
+`Carlos Alberto GAXIOLA GARCIA` at 100% and cannot tell whether that is the same
+human — the information needed is not in the strings. The officer resolves it
+using things the matcher never sees: date of birth, nationality, the document
+result, the address. Then they write down what they concluded.
+
+Every layout decision below follows from that one sentence.
+
+### Why the evidence is side by side and not behind tabs
+
+**Because the task is comparison, not reading.**
+
+The applicant's date of birth and the list entry's date of birth have to be
+visible at the same moment, because the officer is holding one against the
+other. Put them on separate tabs and the officer carries a date in their head
+while clicking — and at case ninety of a shift, that is exactly where mistakes
+come from.
+
+Tabs are fine for material read in sequence. They are actively harmful for
+material read against each other. So the case view is a grid: applicant
+details, document check and screening matches all on screen together, with the
+decision panel beside them rather than below.
+
+The same reasoning puts the score and the flag reasons above the fold. The
+officer's first judgement is *how much attention does this deserve*, and they
+should be able to make it before scrolling.
+
+In the working demo this shows up as, for example, applicant date of birth
+`1975-11-02` sitting directly opposite listed date of birth `1975-04-12` —
+which is the entire decision, visible in one glance.
+
+### Why the reason is mandatory, and what an auditor does with it
+
+An auditor — internal, external, or the regulator — samples decisions and asks
+one question per case: **was this decision reasonable on the evidence available
+at the time?**
+
+They are not checking whether the outcome was right. They are checking whether
+a competent person, seeing what your officer saw, could have reached that
+conclusion. That is only answerable if the officer wrote down what they
+concluded and why.
+
+Concretely, they use the field to:
+
+- **Test overrides.** An approval on a case scoring 65 is fine if the reason
+  reads "PEP match is a different individual: listed DOB 1962, applicant 1988,
+  different nationality". The same approval reading "looks ok" is a finding
+  against the firm.
+- **Detect pattern behaviour.** Thirty cases approved with an identical sentence
+  means somebody found a shortcut, not thirty individual judgements.
+- **Reconstruct intent after the rules changed.** Phase 5 stores the thresholds
+  in force; the reason supplies what the human was thinking.
+- **Establish that the control exists at all** — that a person is exercising
+  judgement rather than software producing numbers.
+
+So the constraint lives in the **database** (`decisions.reason` is `NOT NULL`
+with a non-blank `CHECK`, from migration 004), with a minimum length in the
+action on top. Neither can force anyone to think, and pretending otherwise
+would be silly. What they do is make the *absence* of a reason impossible, so a
+sampling auditor always has something to read — and a one-word reason is itself
+a finding they can act on.
+
+### Why the timeline is read-only, and how that reaches back to Phase 1
+
+Because it is **physically read-only**. Migration 006 put `BEFORE UPDATE`,
+`BEFORE DELETE` and `BEFORE TRUNCATE` triggers on `audit_events` that raise an
+exception. There is no edit control to build, because the write would be
+refused.
+
+That is the whole append-only design finally surfacing in a user interface. The
+timeline is not a log the firm curates — it is **evidence**, and its value comes
+entirely from nobody being able to tidy it. A correction appears as a new event
+saying something was corrected, never as a changed row. The page says so in
+those terms, because a reader who does not know the triggers exist would
+otherwise assume "read-only" meant "we chose not to add a button".
+
+### Two officers, one case: how the guard works
+
+Three layers, doing three different jobs. Only the last one is a guarantee.
+
+| Layer | Mechanism | What it gives |
+| --- | --- | --- |
+| UI | a decided case renders with no buttons and no reason box | stops the honest mistake |
+| Transaction | `SELECT … FOR UPDATE`, then re-read | determinism, and a good error message |
+| Database | partial unique index `decisions_one_terminal_per_application` | **impossibility** |
+
+**Plain `FOR UPDATE`, not `FOR UPDATE SKIP LOCKED`.** Same lock as the job
+queue, opposite modifier, and the reason is a human one rather than a technical
+one.
+
+The queue *skips* contended rows because another worker will take them and
+nobody needs telling. The desk must do the opposite: the loser of a race is a
+**person waiting for an answer**, and silently doing nothing is the worst
+possible response. So the second transaction **blocks** until the first commits,
+then re-reads, finds the case decided, and can therefore report *who* decided
+it. `SKIP LOCKED` would have made the second officer's submission vanish.
+
+The re-read has to happen **after** the lock is acquired. Anything read before
+it is a guess about a row someone else may have been changing.
+
+**What was deliberately not built:** a soft claim ("Alice is looking at this").
+Real desks have it and it is genuinely useful, but it is advisory — it reduces
+collisions and cannot prevent them. Building it without the index underneath
+would be worse than not building it, because people would trust it.
+
+### The security trap worth knowing about
+
+`/desk/*` is guarded in the **layout**, not in Next.js middleware, because
+middleware runs on the Edge runtime where `node:crypto` does not exist. The
+workarounds end either in a broken build or in a hand-rolled signature on the
+wrong primitive. A layout is a Server Component on the Node runtime, it wraps
+every page beneath it, and there is one of it.
+
+**But a layout guard does not protect Server Actions.** An action is a POST
+endpoint that exists independently of any page: anyone who knows its id can call
+it without ever rendering the layout that was supposed to be guarding it. So
+`requireStaff()` is the first line of the decision action, and the layout check
+is only a convenience for navigation. Verified by calling the action with no
+session at all: `303 → /login`, nothing written.
+
+### The login, and its honest limits
+
+One account from `.env`, an HMAC-signed cookie, no framework.
+
+- Signed, not encrypted: signing stops forgery, and the payload contains only an
+  email and two timestamps, none of it secret.
+- `httpOnly` so a cross-site scripting bug elsewhere cannot steal it;
+  `sameSite=lax` as the basic CSRF defence for the decision action.
+- Both email and password compared with `timingSafeEqual`, and **both
+  comparisons always run** — short-circuiting on `&&` would make a wrong email
+  answer measurably faster than a wrong password, which tells an attacker
+  whether an address exists. One error message for both failures, for the same
+  reason.
+- Expiry is checked **after** the signature. Reading an unverified payload to
+  decide anything, even whether to bother verifying, is how signature checks get
+  quietly bypassed.
+- A fixed-window rate limit on failures, in memory — and therefore honestly
+  limited: it resets on restart and is per-process. For one demo account that is
+  fine; for real users it belongs in the database. Having none at all would
+  leave a login endpoint anyone can brute-force at line rate.
+
+**The password sits in `.env` in plaintext, and hashing it there would be
+theatre** — the hash and the signing secret would live in the same file, so an
+attacker who can read one can read the other. What actually matters at this
+scale is constant-time comparison, a signed cookie, and never logging
+credentials. With real users the gaps are specific rather than vague: per-user
+rows with scrypt or argon2, rate limiting that survives a restart, session
+revocation (a signed cookie is valid until it expires and there is no way to
+cancel one), password reset, and a second factor. Naming which pieces are
+missing is more useful than implying none are.
+
+### Design decisions for a tool used six hours a day
+
+- **Denser than the applicant-facing pages** — 13px, tight rows, monospace for
+  ids and scores. Many cases visible at once.
+- **Colour carries meaning only**: score bands, decision outcomes, waiting time.
+  Anything coloured decoratively steals attention from a signal that needs it.
+- **Oldest first, always, with no sort control.** The longest-waiting case has
+  the most regulatory exposure, and a queue that lets you sort it away will
+  eventually hide it for a fortnight. Waiting time turns amber after a day and
+  red after three.
+- **Keyboard**: `j`/`k` and arrows move, `Enter` opens. Officers arriving from
+  other compliance software try these before reading anything.
+- **`a` and `r` focus the reason box rather than deciding.** Deliberate: a
+  single keystroke must never record a decision. The shortcut saves the reach
+  for the mouse; it does not skip the part where the officer says why.
+- **Weak screening matches are shown, not hidden.** Whether the strong match is
+  a coincidence is far easier to judge when you can see how many others came
+  close — and an auditor asking "what did you consider?" needs an answer that is
+  not "whatever the threshold let through".
+
+### A bug this phase created and fixed
+
+`npm run build:check` (added in Phase 3 to stop production builds clobbering a
+running dev server) writes to `.next-check`, and Next.js adds
+`.next-check/types` to `tsconfig`'s `include` when it builds there. A leftover
+directory meant `tsc --noEmit` typechecked the route validator from an **old**
+build alongside the current one, producing a baffling error about a route not
+satisfying the constraint `"/"` in a generated file nobody wrote.
+
+Fixed by having the script remove its output directory before and after, so
+there is never a stale one for `tsc` to find. Worth recording because the error
+message points nowhere near the cause.
+
+### Evidence
+
+- Signing in: wrong password returns "Those details do not match an account";
+  the correct one sets an `HttpOnly; SameSite=lax` signed cookie and redirects
+  to `/desk`. `/desk` without a session is `307 → /login`.
+- The queue renders six cases oldest first with waiting time, score, country and
+  the top flag reason on one line.
+- A case view shows applicant DOB `1975-11-02` beside listed DOB `1975-04-12`,
+  the match at 100% attributed to its alias (`Ahmed Hassan Mahmoud`, alias of
+  `Ahmad Hasan`), the reasons list, the decision panel and the full timeline.
+- **The race:** two clients sharing one session, both POSTing a decision at the
+  same instant. One recorded an approval; the other was told
+  `alreadyDecidedBy: "staff:officer@example.com"`. The database holds exactly
+  **one** terminal decision and exactly **one** human `decision.recorded` audit
+  event, and the application is `decided`.
+- Reloading the decided case: **zero** approve buttons, **zero** reject buttons,
+  **zero** reason boxes — the panel shows the outcome, who, when, the score at
+  the time, and the written reason.
+- A stale page POSTing again, bypassing the UI: refused, same message, nothing
+  written.
+- A direct `INSERT` with no application code involved:
+  `ERROR: duplicate key value violates unique constraint
+  "decisions_one_terminal_per_application"`.
+- The action called with no session at all: `303 → /login`.
+- A one-word reason: refused, and **0** terminal decisions created.

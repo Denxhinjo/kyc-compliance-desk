@@ -106,10 +106,45 @@ security bug. Raw bytes have exactly one interpretation.
 
 ## Status
 
-Phase 5 complete. An applicant can fill in the form, complete identity
-verification, and watch the application move through its lifecycle on its own —
-then be screened against a real sanctions list, scored, and either
-auto-approved, auto-rejected or referred to a human with written reasons.
+Phase 6 complete. An applicant fills in the form, completes identity
+verification, and watches the application move through its lifecycle on its own
+— then it is screened against a real sanctions list, scored, and either
+auto-approved, auto-rejected, or referred to a compliance officer who decides it
+at the review desk.
+
+### The review desk
+
+`/desk`, behind a staff login. The screen the rest of the system exists to feed.
+
+An officer's job is narrower than it sounds: **is this the person on the list,
+or someone who shares their name?** Everything in the layout follows from that.
+Applicant details, document result and screening matches sit side by side rather
+than behind tabs, because the task is comparison — the applicant's date of birth
+and the listed one have to be readable in the same glance. Score and flag
+reasons are above the fold. The queue is oldest-first with no sort control,
+because the longest-waiting case carries the most regulatory exposure.
+
+A written reason is required, and enforced by a `CHECK` constraint rather than
+only by the form. An auditor samples decisions and asks one question per case:
+*was this reasonable on the evidence available at the time?* That is only
+answerable if the officer wrote down what they concluded.
+
+**Two officers cannot decide the same case.** Three layers:
+
+| Layer | Mechanism | What it gives |
+| --- | --- | --- |
+| UI | decided cases render with no buttons | stops the honest mistake |
+| Transaction | `SELECT … FOR UPDATE`, then re-read | determinism and a good error message |
+| Database | partial unique index on terminal decisions | **impossibility** |
+
+Plain `FOR UPDATE`, not `SKIP LOCKED` — the opposite of the job queue, on
+purpose. The queue skips contended rows because another worker will take them.
+Here the loser of a race is a person waiting for an answer, so the second
+transaction blocks, re-reads, and reports who decided it.
+
+The case timeline is read-only because `audit_events` physically rejects
+`UPDATE`, `DELETE` and `TRUNCATE` (migration 006). There is no edit control to
+build.
 Results are applied through a vendor-neutral adapter and guarded by an explicit
 state machine, so duplicate, late and out-of-order deliveries are harmless. A
 sweeper reconciles anything the vendor never managed to tell us.
@@ -171,6 +206,8 @@ signal. Recall was unaffected. The full argument, with numbers in both
 directions, is in [docs/decisions.md](docs/decisions.md).
 
 ```bash
+# the desk: http://localhost:3001/login   (credentials are printed on the page)
+
 cd worker && .venv/Scripts/python -m pytest    # 121 tests, no database needed
 .venv/Scripts/python analyse_distribution.py --count 2000 --source ofac
 

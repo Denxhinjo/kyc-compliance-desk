@@ -325,3 +325,57 @@ not a prediction.
 **Ruleset version.** A label stored with every score identifying which version
 of the rules produced it, so an old decision can be reproduced after the rules
 change.
+
+## Added in Phase 6
+
+**Compliance officer.** The person who decides the cases automation would not.
+Their actual question is narrower than it sounds: is this the person on the
+list, or someone who happens to share their name?
+
+**Four-eyes principle.** Requiring a second person to approve certain
+decisions. Not implemented here — worth knowing as the next control a real firm
+would add above a threshold.
+
+**Audit sampling.** How an auditor works: pull a sample of decisions and ask,
+per case, whether the decision was reasonable on the evidence available at the
+time. Not whether the outcome was right. This is what the mandatory reason
+field exists to answer.
+
+**Override.** A human decision that goes against what the score suggested.
+Legitimate and expected — the reason field is what makes it defensible rather
+than suspicious.
+
+**`SELECT … FOR UPDATE` vs `FOR UPDATE SKIP LOCKED`.** The same row lock with
+opposite behaviour when contended. `SKIP LOCKED` moves on, which is right for a
+job queue where another worker will take the row. Plain `FOR UPDATE` waits,
+which is right when the loser is a person who needs to be told what happened.
+
+**Optimistic vs pessimistic concurrency.** Pessimistic takes the lock first
+(what the desk does). Optimistic writes and lets a constraint reject the loser
+(what the unique index does). Here both are used: the lock for a good error
+message, the constraint for the guarantee.
+
+**Backstop constraint.** A database rule that holds even when every layer above
+it has a bug. `decisions_one_terminal_per_application` is what makes deciding
+twice impossible rather than merely discouraged.
+
+**Signed cookie.** A session value with an HMAC attached, so the server can tell
+it produced it. Signed, not encrypted: it prevents forgery, it does not hide the
+contents — which is fine when the contents are not secret.
+
+**`httpOnly`.** A cookie flag making the value unreadable from JavaScript, so a
+cross-site scripting bug elsewhere cannot steal the session.
+
+**`SameSite=lax`.** A cookie flag stopping the browser sending it on cross-site
+POSTs. The basic defence against cross-site request forgery.
+
+**CSRF — cross-site request forgery.** Tricking a logged-in user's browser into
+submitting a request to your site from somewhere else.
+
+**Server Action as a public endpoint.** A Next.js Server Action is a POST
+endpoint independent of any page. Guarding the page that renders it does not
+guard the action; the check has to be inside the action itself.
+
+**Session revocation.** Cancelling a session before it expires. A signed cookie
+with no server-side record cannot be revoked, which is a real limitation of the
+simple approach used here.
