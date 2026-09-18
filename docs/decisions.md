@@ -1,7 +1,58 @@
 # Decisions
 
-A running log of what was built in each phase, what was decided, and why.
-Written to be readable by someone who was not here.
+A record of what was built in each phase, what was decided, what was rejected,
+and — where it happened — what turned out to be wrong.
+
+Written to be readable by someone who was not here. It is deliberately not a
+changelog: a changelog says what changed, and the useful part is almost always
+*why*, and what the alternative would have cost.
+
+> **Synthetic data throughout.** Every applicant, match and decision described
+> below is invented. See the [README](../README.md) for the full disclaimer and
+> for an unsparing list of what this demo does not do.
+
+## What to read if you only read one thing
+
+Three sections carry most of the reasoning:
+
+- **[Phase 2 — the job queue](#phase-2--the-job-queue)** for why a Postgres
+  table is a legitimate queue, and when it stops being one.
+- **[Phase 5 — sanctions screening and risk scoring](#phase-5--sanctions-screening-and-risk-scoring)**
+  for the threshold argument, which is the one real judgement call in the
+  project, and for the measurement that forced it to change.
+- **[Phase 4 — the worker processing results](#phase-4--the-worker-processing-results)**
+  for how out-of-order and duplicate delivery are made harmless.
+
+## Contents
+
+| Phase | What it covers |
+| --- | --- |
+| [0 — Foundations](#phase-0--foundations) | Repo layout, why `/db` belongs to neither service, the walking skeleton |
+| [1 — Data model and audit log](#phase-1--data-model-and-audit-log) | Five tables, append-only enforcement, and a bug that would have passed silently |
+| [1a — `referred` as an outcome](#addendum-referred-is-a-decision-after-all-migration-007) | Reversing an earlier decision without editing an applied migration |
+| [2 — The job queue](#phase-2--the-job-queue) | `FOR UPDATE SKIP LOCKED`, measured against the broken alternative |
+| [3 — Applicant flow and the webhook](#phase-3--applicant-flow-the-vendor-and-the-webhook) | Signature verification, idempotency, why the endpoint does almost nothing |
+| [4 — The worker processing results](#phase-4--the-worker-processing-results) | The state machine, the recency guard, and the sweeper |
+| [5 — Screening and risk scoring](#phase-5--sanctions-screening-and-risk-scoring) | Fuzzy matching, the threshold argument, and why auto-rejecting on a name is wrong |
+| [6 — The review desk](#phase-6--the-compliance-review-desk) | What an officer is actually doing, and how two of them cannot decide one case |
+| [7 — Seed data, stats and retention](#phase-7--seed-data-stats-retention-and-states) | Making synthetic data that does not look synthetic; publishing numbers honestly |
+
+## A note on the things that were wrong
+
+Several sections below record mistakes rather than decisions. That is
+deliberate, and they are the parts most worth reading:
+
+- **Phase 1** — a test that printed a perfect result while writing nothing to
+  the database, because of how psycopg nests transactions.
+- **Phase 4** — a state machine that was correct, paired with a web service
+  that transitioned status without consulting it.
+- **Phase 5** — a matching rule that would have rejected a third of a real
+  customer book, and the "obvious" fix for it that was also wrong.
+- **Phase 7** — two successive models of a review backlog, both wrong in
+  different directions.
+
+A document that recorded only the decisions that worked would be a marketing
+page.
 
 ---
 
@@ -1398,3 +1449,163 @@ message points nowhere near the cause.
   "decisions_one_terminal_per_application"`.
 - The action called with no session at all: `303 → /login`.
 - A one-word reason: refused, and **0** terminal decisions created.
+
+---
+
+## Phase 7 — Seed data, stats, retention and states
+
+### Making synthetic data that does not look synthetic
+
+The tells first, because every choice in the seeder is aimed at one of them:
+
+1. **Flat timestamps.** `random.uniform(start, end)` produces a histogram with
+   no shape. Real arrivals have a daily rhythm and a weekly one, and a
+   histogram is the first thing anyone plots.
+2. **Uniform everything.** Ages evenly spread 18–80; every name used exactly
+   twelve times out of five hundred.
+3. **No correlation between fields.** Random name crossed with random country
+   gives "Wolfgang Schmidt, Vietnam".
+4. **Every journey complete.** Real funnels are full of people who started and
+   wandered off, and a dataset where everyone finishes quietly flatters every
+   percentage computed from it.
+5. **Tidy outcome ratios.** Exactly 33/33/33 is the fingerprint of someone
+   generating to a specification rather than observing a process.
+6. **Machine-even durations.** Everything taking two to four hours, no tail.
+7. **Insertion order not matching time order.** Generate in random order and
+   the sequential `id` stops being monotonic with `created_at` — which is
+   precisely what a backfill looks like.
+
+The fixes: rejection sampling on an hour-of-day curve times a weekday weight;
+Zipf-biased name frequency; a lognormal age distribution; lognormal durations
+with a long right tail; 14% of applicants who never finish; and rows inserted
+**chronologically**, so ids and timestamps agree.
+
+The single most valuable detail is that **officers work office hours**. It is
+what makes the queue build overnight and across weekends and drain on the next
+working morning, and it is what makes median time-to-decision a real number
+rather than a constant. A Friday evening referral genuinely waits until Monday.
+
+### The outcomes are computed, not assigned
+
+The seeder does not decide who gets approved. It generates applicants and
+vendor results, then runs the **real** Phase 5 code — the actual
+`SanctionsIndex` against 19,385 OFAC entries, the actual pure
+`score_application()` — and routes on the real thresholds. Only the human
+decisions on referred cases are simulated.
+
+So the published figures measure the pipeline rather than assumptions about it.
+The consequence is that the outcome mix is lopsided, because that is what the
+scoring produces. An even split would itself have been the tell.
+
+### Two wrong models of a backlog
+
+Recorded because the second one was wrong in a more interesting way than the
+first.
+
+**Model one:** officers always clear the queue within the working day. Result:
+one case pending out of five hundred. Optimistic rather than realistic — real
+desks carry a backlog.
+
+**Model two:** every referral has a flat 18% chance of still being open,
+independent of age. Result: a queue whose oldest case had been waiting 32 days.
+
+That number is not a backlog, it is a control failure — but more importantly
+the *model* was wrong, not the roll. A flat probability implies a case from six
+weeks ago is exactly as likely to be outstanding as one from yesterday, and
+real queues do not behave that way: old items get chased, escalated and
+cleared.
+
+**Model three**, the one in the code: the probability decays with age, plus a
+small floor for the genuinely stuck — the case waiting on a document the
+applicant will never send. Most of the queue is recent; one or two stragglers
+are old, which is both true to life and exactly what the red waiting-time
+styling on the desk exists to surface.
+
+The distinction matters: changing model two to model three was fixing a
+modelling error, not tuning the data until the number looked better. The
+resulting oldest-case figure is still unflattering, and it is still published.
+
+### The honesty problem
+
+The seeder writes **backdated `audit_events`** — the one table in this system
+meant to be unvarnished truth, fabricated six weeks deep.
+
+So every seeded row carries `"seeded": true` in its details. Anyone can filter
+them out, and nobody reading a timeline can mistake invented history for real
+history.
+
+It also cannot be undone. `audit_events` rejects `DELETE`, and that rule binds
+the script that wrote it as much as anyone else — so the seeder refuses to run
+twice without `--force`, and a genuine reset means dropping the schema and
+re-migrating. Discovering that the constraint applied to us was a good sign
+that it was built properly.
+
+### Publishing numbers honestly
+
+Three rules, all of them enforced on the page rather than in a style guide:
+
+**Median, never mean.** One case stuck for three weeks moves a mean enormously
+and a median not at all — and the mean is the one that would get quoted. The
+90th percentile is shown alongside, because a median on its own hides a bad
+tail, and the tail is where the operational problem lives.
+
+**Every percentage carries its denominator.** "87.6% auto-decided" means
+nothing without "of 421 decided". A percentage with no base is a number nobody
+can check, and the whole point of publishing them is that they can be.
+
+**Below twenty decisions, the page says so rather than showing a figure.** A
+median computed from nine cases is not a median, it is an anecdote with a
+decimal point.
+
+And one that only appeared once there were real numbers to look at: **the
+median had to be split by who decided.** The combined figure came out at nine
+minutes, which is true and useless — with ~88% of decisions automatic and
+taking seconds, the machine drowns the number anyone actually wants. Reviewed
+cases take **13.9 hours**, and a single combined median hides that completely.
+That is the kind of figure that is misleading precisely because it is accurate.
+
+### Queue retention, the loose end from Phase 2
+
+`jobs.cleanup` deletes `done` jobs by age and **never touches `parked`**.
+Parked is the dead letter queue — the only record that a piece of work failed
+and was given up on — so deleting it deletes the evidence that something went
+wrong. Parked jobs leave when a human deals with them, not when a timer fires.
+The job warns on every run while any remain.
+
+The contrast worth drawing: **the job queue is operational plumbing and has a
+retention policy; `audit_events` is evidence and has none.** One is machinery,
+the other is the record of what the machinery did, and only one of them is
+allowed to forget.
+
+Honest cost: `DELETE` leaves dead tuples for vacuum, and a queue that churns
+hard enough will spend real effort on that. At very high throughput the answer
+is a partitioned table and `DROP PARTITION`, which is a metadata operation
+rather than a row-by-row delete. At this scale `DELETE` is right, and saying
+when it would stop being right is more useful than implying it always is.
+
+### Empty and loading states
+
+The empty queue is treated as **success, not an error** — it is a state a
+visitor may well land on, and it should read as "all clear" while explaining
+what would put a case there.
+
+Loading skeletons mirror the real layout rather than showing a spinner, so
+nothing jumps when the data arrives. That matters most on the case view, which
+an officer opens hundreds of times a day: a layout that settles differently
+each time is a layout you cannot build muscle memory against.
+
+The not-found page deliberately does not distinguish "no such application" from
+"not yours". An application id is a bearer token in this system — anyone
+holding it can see the status page — so telling the difference would let
+someone probe for which ids exist.
+
+### Evidence
+
+- 500 applicants seeded over six weeks in 13 seconds, scored against 19,385
+  real OFAC entries.
+- The arrival histogram has genuine diurnal shape: 1 arrival at 02:00, 34 at
+  10:00, 54 at 20:00, tailing to 14 at 23:00.
+- 421 of 500 reached a decision; 87.6% of those without a human; 9 minutes
+  median automatic, 13.9 hours median reviewed.
+- Retention: 40 `done` jobs older than seven days deleted, 5 recent ones kept,
+  the single `parked` job untouched and warned about on every run.

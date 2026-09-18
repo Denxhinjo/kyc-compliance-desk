@@ -379,3 +379,45 @@ guard the action; the check has to be inside the action itself.
 **Session revocation.** Cancelling a session before it expires. A signed cookie
 with no server-side record cannot be revoked, which is a real limitation of the
 simple approach used here.
+
+## Added in Phase 7
+
+**Rejection sampling.** Propose a random value, keep it with probability
+proportional to how likely it should be. A few lines, and it turns a flat
+distribution into one with real shape — used here for arrival times.
+
+**Zipf distribution.** The pattern where a few values are very common and most
+are rare. Real name frequency follows it; a uniform draw over a name pool does
+not, which is one of the clearest tells of generated data.
+
+**Median vs mean.** The middle value versus the average. One case stuck for
+three weeks moves a mean enormously and a median not at all, which is why every
+latency figure here is a median.
+
+**Percentile (p90).** The value below which 90% of observations fall. Shown
+alongside the median because a median on its own hides a bad tail, and the tail
+is where the operational problem lives.
+
+**Denominator.** The base a percentage is computed over. "87.6%" is unverifiable;
+"369 of 421 decided" can be checked. Every percentage in this project carries
+one.
+
+**Small-n.** Too few observations for a statistic to mean anything. The stats
+page refuses to show a median below twenty decisions rather than presenting an
+anecdote with a decimal point.
+
+**Dead letter queue.** Where work goes after automatic recovery has been
+exhausted, so a human can look at it. Never deleted by retention — it is the
+only record that something failed.
+
+**Retention policy.** A rule for how long operational data is kept. The job
+queue has one; `audit_events` deliberately does not, because it is evidence
+rather than plumbing.
+
+**Dead tuple.** The old version of a row left behind by an `UPDATE` or
+`DELETE`, cleaned up later by vacuum. Why a high-churn queue table eventually
+wants partitioning rather than deletion.
+
+**Skeleton screen.** A loading placeholder shaped like the content that is
+coming, rather than a spinner. Keeps the layout from jumping when data arrives
+— which matters most on a screen someone opens hundreds of times a day.
