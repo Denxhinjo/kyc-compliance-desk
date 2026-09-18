@@ -131,6 +131,7 @@ export default async function QueuePage() {
       {decided.length > 0 && (
         <>
           <h2>Recently decided</h2>
+          <div className="table-scroll">
           <table className="grid muted-grid">
             <thead>
               <tr>
@@ -155,6 +156,7 @@ export default async function QueuePage() {
               ))}
             </tbody>
           </table>
+          </div>
         </>
       )}
     </main>

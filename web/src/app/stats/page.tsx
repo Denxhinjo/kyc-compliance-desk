@@ -279,6 +279,7 @@ export default async function StatsPage() {
 
       <h2>Outcome split</h2>
       {enoughData ? (
+        <div className="table-scroll">
         <table className="grid">
           <thead>
             <tr>
@@ -321,6 +322,7 @@ export default async function StatsPage() {
             </tr>
           </tbody>
         </table>
+        </div>
       ) : (
         <p className="empty">
           Only {total.decided} decision

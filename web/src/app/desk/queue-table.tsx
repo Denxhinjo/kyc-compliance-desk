@@ -59,6 +59,10 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
 
   return (
     <div ref={containerRef}>
+      {/* Scrollable rather than squeezed. A dense operations table has a width
+          below which it stops being readable; letting it scroll sideways keeps
+          every column intact instead of crushing all of them. */}
+      <div className="table-scroll">
       <table className="grid queue">
         <thead>
           <tr>
@@ -91,6 +95,7 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
           ))}
         </tbody>
       </table>
+      </div>
       <p className="keys">
         <kbd>j</kbd> <kbd>k</kbd> move · <kbd>↵</kbd> open case
       </p>

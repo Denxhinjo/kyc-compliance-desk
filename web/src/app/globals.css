@@ -626,3 +626,43 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .skeleton { animation: none; }
 }
+
+/* --- narrow screens -------------------------------------------------------
+   A compliance desk is not a phone tool, and pretending otherwise by
+   collapsing every table into stacked cards would destroy the one property
+   that makes it usable: many cases visible at once, aligned in columns.
+
+   So the tables keep their shape and scroll sideways instead. Every column
+   stays intact and readable; you move the viewport rather than the data. The
+   page itself never scrolls horizontally — only the tables do.
+   -------------------------------------------------------------------------- */
+
+.table-scroll {
+  overflow-x: auto;
+  /* Momentum scrolling on iOS, which otherwise feels broken. */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* The queue's flag column carries a full sentence. Give it room to be worth
+   reading rather than truncating it to three words. */
+.queue .reason { min-width: 260px; }
+.queue .col-name { min-width: 150px; }
+
+@media (max-width: 720px) {
+  .desk-main, .case { padding-left: 12px; padding-right: 12px; }
+
+  /* The demo marker is the one thing that must survive every breakpoint. */
+  .desk-bar { flex-wrap: wrap; gap: 6px 10px; }
+  .desk-spacer { display: none; }
+
+  .desk-head { flex-direction: column; gap: 4px; }
+
+  /* Bigger touch targets for the two buttons that record a decision. */
+  .decide-buttons { flex-direction: column; }
+  .btn { padding: 13px 12px; }
+
+  /* 30 days of bars at phone width would be 8px each. Let the chart scroll
+     with legible columns rather than rendering thirty unreadable slivers. */
+  .chart { overflow-x: auto; }
+  .chart-col { min-width: 14px; }
+}

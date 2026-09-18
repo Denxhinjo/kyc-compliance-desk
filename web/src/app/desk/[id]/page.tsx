@@ -225,6 +225,7 @@ export default async function CasePage({
           {matchResult.rows.length === 0 ? (
             <p className="dim">No list entry came close enough to record.</p>
           ) : (
+            <div className="table-scroll">
             <table className="grid matches">
               <thead>
                 <tr>
@@ -278,6 +279,7 @@ export default async function CasePage({
                 })}
               </tbody>
             </table>
+            </div>
           )}
           <p className="dim small">
             A strength is a name similarity, not a verdict. Weak matches are
