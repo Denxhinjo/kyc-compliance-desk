@@ -1,0 +1,9 @@
+# Never ship these into an image.
+**/node_modules
+**/.next
+**/.next-check
+**/.venv
+**/__pycache__
+**/*.pyc
+.git
+.env
