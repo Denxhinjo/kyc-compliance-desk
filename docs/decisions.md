@@ -2013,3 +2013,25 @@ deliberately **not** autouse: as autouse it attached to all 171, so an
 unreachable database skipped the pure tests too — a suite that looks green
 having tested nothing. That was caught by running it against a dead port and
 counting, which is a habit worth keeping.
+
+### What CI caught on its very first run
+
+The migration-017 tests had been connecting to `DATABASE_URL` directly — the
+development database — and passing because that database happened to be
+migrated. On the CI runner Postgres was reachable and empty, so all 25 errored
+instead of skipping.
+
+Two things wrong there, and only the second is obvious:
+
+1. They cannot run on a fresh clone or a clean database, which is the case the
+   skip logic was written for.
+2. **They were running against the developer's working database.** Rolled back
+   per test, so nothing was harmed — but a suite that opens a connection to
+   whatever you happen to be using is one editing mistake away from being a
+   problem, and nobody had noticed because it always worked.
+
+Both fixed by having that fixture depend on the throwaway `_test` database like
+everything else. Worth recording because it is the argument for CI in miniature:
+the failure had existed since migration 017 shipped, was invisible on the
+machine that wrote it, and was found within ninety seconds of a machine that had
+never seen the project running the tests.

@@ -26,7 +26,6 @@ import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
-from db import connect  # noqa: E402
 from lifecycle import ALLOWED_TRANSITIONS, LIFECYCLE  # noqa: E402
 
 #: Postgres' SQLSTATE for RAISE ... USING errcode = 'restrict_violation'.
@@ -45,14 +44,22 @@ ROUTE_FROM_STARTED = {
 
 
 @pytest.fixture(scope="module")
-def conn():
+def conn(schema):
     """One connection for the module, or skip the whole file.
 
     A missing database is not a failure — it is the ordinary state of a fresh
     clone, and failing there would train people to ignore a red suite.
+
+    Connects to the throwaway `_test` database built by conftest's `schema`
+    fixture, NOT to DATABASE_URL directly. These tests originally used the
+    development database and passed because it happened to be migrated. CI
+    found the flaw immediately: a reachable but unmigrated database made every
+    test here error rather than skip. Depending on `schema` means the tables
+    are guaranteed to exist — and the tests stop running against whatever
+    database the developer is using at the time.
     """
     try:
-        connection = connect()
+        connection = psycopg.connect(schema, connect_timeout=5)
     except Exception as err:  # noqa: BLE001 — any connection problem means skip
         pytest.skip(f"no database reachable: {err}")
     try:
