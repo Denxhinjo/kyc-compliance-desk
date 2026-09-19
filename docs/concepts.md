@@ -439,3 +439,26 @@ used. Lets a decision be reconstructed later even though the source has moved on
 **Staleness.** The gap between when a list was published and when it is being
 relied upon. Recording both dates makes it measurable; measuring it is not the
 same as preventing it.
+
+## Added with the integration tests
+
+**Integration test.** A test that runs several real parts together — here, real
+handlers against a real Postgres — as opposed to a unit test, which checks one
+function in isolation. Slower, and the only kind that can verify a guarantee
+the database provides.
+
+**Fixture.** Test setup that several tests share: a connection, a migrated
+schema, a throwaway application. Named so tests can ask for what they need by
+name instead of repeating the setup.
+
+**CI (continuous integration).** A service that runs the test suite
+automatically on every push, so a regression is found by the machine rather than
+by whoever next happens to run the tests by hand.
+
+**Poison pill.** A job that reliably kills whatever worker picks it up. Dangerous
+because a naive retry hands it to the next worker, and the next — which is why
+attempts are counted at claim time, not at success time.
+
+**Counterfactual test.** A test asserting that something deliberately broken is
+still broken, so that a well-meaning "fix" to it cannot silently invalidate the
+comparison it exists to demonstrate.

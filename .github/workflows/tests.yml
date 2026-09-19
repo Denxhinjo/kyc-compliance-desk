@@ -1,0 +1,84 @@
+name: tests
+
+# Every push and every pull request. The integration tests exist to be run
+# without anyone remembering to run them; a workflow that only fires on main
+# would let a branch break the queue and find out after merging.
+on:
+  push:
+  pull_request:
+
+jobs:
+  worker:
+    name: worker (pytest + Postgres)
+    runs-on: ubuntu-latest
+
+    services:
+      # A real Postgres, not a stub. Everything interesting in this project is
+      # a database guarantee — SKIP LOCKED, the lifecycle trigger, the partial
+      # unique indexes, the append-only rules — and none of it survives being
+      # mocked. The container is thrown away with the runner.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kyc
+          POSTGRES_PASSWORD: kyc
+          POSTGRES_DB: kyc
+        ports:
+          - 5432:5432
+        # Without this the job races the database's own startup and fails
+        # intermittently, which is worse than failing consistently.
+        options: >-
+          --health-cmd "pg_isready -U kyc"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # conftest.py derives the test database from this by appending `_test`,
+      # then drops and recreates its schema with the real db/migrate.py. So
+      # every run also exercises the migration runner against an empty
+      # database — the path a deploy takes, and one nothing else covers.
+      DATABASE_URL: postgres://kyc:kyc@localhost:5432/kyc
+      SANCTIONS_SOURCE: synthetic
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: worker/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r worker/requirements.txt
+
+      - name: Run the tests
+        working-directory: worker
+        # -q for a readable log; the failures are what anyone reads this for.
+        run: python -m pytest -q
+
+  web:
+    name: web (typecheck)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      # No database here on purpose. The web tests worth having are the ones
+      # the compiler gives for free: the pages and the server actions read the
+      # schema through typed queries, so a build failure catches a column that
+      # moved. Behaviour in the browser is not covered, and the README says so.
+      - name: Typecheck
+        working-directory: web
+        run: npx tsc --noEmit

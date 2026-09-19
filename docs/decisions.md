@@ -1900,3 +1900,116 @@ saying why no value was invented.
 it. The gap between them *is* the staleness, and having both recorded means it
 can be measured rather than guessed — which is what the eventual fix will need
 in order to alarm on anything.
+
+---
+
+## Correction: integration tests and CI
+
+### What was actually wrong
+
+Every interesting claim this project makes had been **demonstrated once, by
+hand, on one machine, and never checked again**.
+
+Two workers and no double-processing: run once in Phase 2. Three identical
+webhooks producing one job: run once in Phase 3. A late result not overwriting a
+newer one, the sweeper rescuing a dropped delivery, two officers racing one case
+— each one a terminal session that scrolled away.
+
+The suite was 121 tests and all of them were green, which is the part that made
+this dangerous rather than merely incomplete. The scoring rules were tested
+thoroughly because they are pure functions and pure functions are easy to test.
+Everything that could actually break in production — the queue, the lock, the
+constraints, the trigger — was tested not at all, because testing it needs a
+database and a database is inconvenient.
+
+That is the usual shape of this mistake: the tests cluster where testing is
+cheap, not where the risk is.
+
+### The fixture problem, and why it forced a different design
+
+The existing database tests (migration 017's) wrap each test in a transaction
+and roll it back. Clean, fast, leaves nothing behind.
+
+It cannot work here, for two independent reasons:
+
+1. **Two workers racing for a job have to see each other's writes.** Seeing
+   requires committing. Committing means the rollback trick is gone.
+2. **`audit_events` refuses DELETE and TRUNCATE.** The append-only rule binds
+   the test suite exactly as it binds everything else, so "clean up afterwards"
+   is not available either.
+
+The second one is worth sitting with. A guarantee that is real is inconvenient
+somewhere, and this is where. A test suite that could empty the audit log would
+be evidence the log was not really append-only.
+
+So: a **throwaway database**, `<name>_test`, whose schema is dropped and rebuilt
+once per session. Pollution stops mattering when the whole thing is disposable.
+
+Rebuilding runs the real `db/migrate.py` in a subprocess rather than replaying
+SQL files directly. That was a deliberate choice for a second benefit: every CI
+run now also exercises the migration runner against an empty database — the
+exact path a deploy takes, and the one thing nothing else covered.
+
+### Two tests that exist to catch a specific edit
+
+Most tests assert that something works. These two assert that a specific
+plausible change would be noticed.
+
+**`test_the_naive_claim_really_is_broken`.** `claim_job_naively` exists to
+demonstrate the race that SKIP LOCKED prevents. If someone ever "fixes" it —
+and it looks exactly like a bug — the comparison the README draws becomes a
+claim about nothing, silently. So the suite asserts it still produces
+duplicates.
+
+**`test_the_desk_lock_has_not_quietly_become_skip_locked`.** This one is
+textual, and worth explaining because it looks like cheating.
+
+Swapping `for update` for `for update skip locked` in the desk action breaks
+nothing the database can see. Only one decision would still be recorded — the
+partial unique index guarantees that regardless. What breaks is the *human*
+behaviour: the second officer's locking query returns no row, so they are told
+"No such case" about a case they are looking at.
+
+No Python test can catch that. The code is TypeScript, and the database is
+unharmed. Reading the file and asserting the query has not changed is a blunt
+instrument, but it is an honest one, and it beats pretending the behaviour is
+covered.
+
+### Something the tests discovered about the schema
+
+Backdating an application to make it look stuck turned out to be impossible.
+`applications_set_updated_at` is a BEFORE UPDATE trigger that overwrites
+`updated_at` with `now()` on every write, so an UPDATE setting it to two hours
+ago is simply undone.
+
+That is correct behaviour, and it means something stronger than it appears:
+**no application's `updated_at` can be forged through the ordinary write path**,
+by our code or by anything else holding a normal connection. The test disables
+the trigger for one statement and restores it, and says why in a comment rather
+than working around it quietly.
+
+### What is still not covered, precisely
+
+CI runs the worker suite against a real `postgres:16`, and typechecks the web
+service. It does not drive a browser. A bug in a React component, or in the
+TypeScript sitting above the SQL, passes.
+
+That is a smaller gap than it sounds for this particular codebase — nearly every
+guarantee here is a database guarantee, and those are now asserted — but it is a
+real one, and the README's limitations section says so in those words rather
+than claiming the suite covers the system.
+
+### The numbers
+
+| | Before | After |
+| --- | --- | --- |
+| Tests | 121 | 171 |
+| Needing a database | 25 | 48 |
+| Run automatically | none | all, on every push |
+
+With no database reachable the 48 skip and the 123 pure ones still run, which is
+why a fresh clone can `pytest` before starting Docker. The `schema` fixture is
+deliberately **not** autouse: as autouse it attached to all 171, so an
+unreachable database skipped the pure tests too — a suite that looks green
+having tested nothing. That was caught by running it against a dead port and
+counting, which is a habit worth keeping.

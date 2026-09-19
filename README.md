@@ -11,6 +11,8 @@
 > regulated onboarding system stays correct when the things it depends on are
 > unreliable.**
 
+[![tests](https://github.com/Denxhinjo/kyc-compliance-desk/actions/workflows/tests.yml/badge.svg)](https://github.com/Denxhinjo/kyc-compliance-desk/actions/workflows/tests.yml)
+
 A customer identity-verification flow (KYC/AML) and the back-office desk where
 a compliance officer handles the cases that cannot be decided automatically.
 
@@ -285,12 +287,26 @@ Fill the database with six weeks of plausible history:
 cd worker && .venv/Scripts/python seed.py --count 500 --weeks 6
 ```
 
-Run the tests — 121 of them, no database and no network needed, because the
-scoring and lifecycle logic are pure functions:
+Run the tests — 171 of them:
 
 ```bash
 cd worker && .venv/Scripts/python -m pytest
 ```
+
+123 are pure: no database, no network, no fixtures, because the scoring and
+lifecycle logic are functions with no I/O in them. They run on a fresh clone
+with nothing installed but the dependencies.
+
+The other 48 need Postgres, and would be worthless without it — SKIP LOCKED,
+the lifecycle trigger, the partial unique indexes and the append-only rules are
+all database guarantees, and a mock of a database proves nothing about them.
+They run against a throwaway database (`DATABASE_URL` with `_test` appended)
+whose schema is dropped and rebuilt by the real `db/migrate.py` each session,
+so every run also exercises the migration runner against an empty database.
+With no database reachable they skip cleanly rather than failing, which is why
+the command above works either way.
+
+CI runs both on every push, against a real `postgres:16`.
 
 > **Do not run `npm run build` while `npm run dev` is running.** They share the
 > `.next` directory, and the build replaces the chunks the dev server is
@@ -589,10 +605,13 @@ approach, not a system that should go near a real customer. Specifically:
 - **No four-eyes principle.** One officer can approve any case alone. Real
   firms require a second reviewer above a threshold.
 - **No role separation.** Every signed-in user can decide anything.
-- **No CI**, and **almost no integration tests** — the lifecycle trigger has
-  25 database-backed tests, but the async behaviour (idempotency, no
-  double-processing, the sweeper) is still verified by demonstration rather
-  than continuously asserted.
+- **The browser is not tested.** CI typechecks the web service and asserts the
+  database contracts its server actions depend on, but nothing drives a page.
+  A bug in a React component, or in the TypeScript above the SQL, would pass.
+  One case is guarded by reading the source rather than running it: a test
+  fails if the desk's `for update` ever becomes `for update skip locked`, which
+  would leave every database guarantee intact while telling the losing officer
+  the case does not exist.
 - **No pagination.** The queue shows 200 cases and silently hides the rest.
 - **No backups, no disaster recovery, no runbook, no alerting.** Nothing tells
   anyone that the parked-jobs count is climbing.
@@ -616,8 +635,8 @@ screening against multiple lists with versioned snapshots; a validated and
 back-tested risk model with documented governance; per-user authentication with
 MFA and role separation; four-eyes on high-risk decisions; a data retention and
 erasure policy reconciled with the audit requirements; WORM storage for audit
-records; integration tests and CI; monitoring and alerting with an on-call
-rota; and a compliance function that has reviewed all of it. That is a team and
+records; end-to-end tests that drive a browser; monitoring and alerting with an
+on-call rota; and a compliance function that has reviewed all of it. That is a team and
 a year, not a demo.
 
 ---
