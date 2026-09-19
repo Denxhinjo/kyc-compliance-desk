@@ -1,0 +1,38 @@
+# Heroku container deploy: one app, two process types, one database.
+#
+# WHY CONTAINERS RATHER THAN BUILDPACKS
+#
+# This repository holds a Node service and a Python service side by side, and
+# neither manifest is at the root. Buildpacks would have needed a root
+# package.json and a root requirements.txt that exist only to point elsewhere —
+# shim files that describe the build system rather than the project. Containers
+# take a build context and a Dockerfile path, which is exactly what is needed,
+# and the same two images already ran under docker-compose.
+#
+# WHY ONE APP RATHER THAN TWO
+#
+# The two services share a database and nothing else. One app means one
+# DATABASE_URL attachment, one set of config vars, one deploy and one release
+# phase — and the release phase is the part that matters, because migrations
+# have to run exactly once per deploy, before either process type restarts.
+# Two apps would have meant choosing which one owned the migrations, and /db
+# deliberately belongs to neither.
+
+build:
+  docker:
+    web: web/Dockerfile
+    worker: worker/Dockerfile
+
+release:
+  # Run from the worker image: it is the one carrying psycopg and /db. This is
+  # not the worker "owning" the schema — it is the container that happens to
+  # hold a Postgres driver, which is the whole reason /db is a third directory
+  # belonging to neither service.
+  #
+  # Heroku aborts the release if this exits non-zero, and does NOT restart the
+  # dynos. A failed migration therefore leaves the previous version running
+  # against the previous schema, which is the correct outcome: no code ever
+  # meets a schema it was not built for.
+  image: worker
+  command:
+    - python ../db/migrate.py up

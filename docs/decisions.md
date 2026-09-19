@@ -2035,3 +2035,129 @@ everything else. Worth recording because it is the argument for CI in miniature:
 the failure had existed since migration 017 shipped, was invisible on the
 machine that wrote it, and was found within ninety seconds of a machine that had
 never seen the project running the tests.
+
+---
+
+## Deploy readiness: three fixes, and what they turned up
+
+Three things were flagged as making a dyno restart risky. Two were real, one was
+already solved, and building them surfaced four more — which is the useful part.
+
+### 1. The reaper was already on a timer. The arithmetic behind it was wrong.
+
+`reclaim_stale_jobs` had run every 60 seconds inside the worker loop since Phase
+2, not only at startup, so there was nothing to build. What had never been
+checked was the relationship the whole thing depends on:
+
+> `JOB_STALE_SECONDS` must exceed the longest a legitimate job can take.
+
+It did not. The longest legitimate job is a sweep against an unresponsive
+vendor, and the shipped values made that:
+
+```
+SWEEP_BATCH_SIZE (50)  x  VENDOR_TIMEOUT_SECONDS (10)  =  500s
+JOB_STALE_SECONDS                                      =  300s
+```
+
+A sweep after an outage, against a vendor that was timing out — which is exactly
+when the sweeper matters — could run for 500 seconds, be presumed dead at 300,
+and be handed to a second worker. The precise double-processing the entire queue
+design exists to prevent, arrived at by configuration rather than by code.
+
+Nothing had ever broken, because the local simulator answers in milliseconds.
+The margin only vanishes under the conditions nobody tests in.
+
+Fixed by moving to `SWEEP_BATCH_SIZE=25` and `JOB_STALE_SECONDS=600` — a 2.4x
+margin — and, more importantly, by **checking the relationship at boot** rather
+than leaving it as a comment. It is a property of three environment variables,
+any of which can be changed on Heroku by someone who has not read `config.py`.
+The worker now logs the margin on every start, or `MISCONFIGURED` when it is
+gone. The first time it ran it immediately caught the stale values still pinned
+in the local `.env`.
+
+The honest limit: this is tuned arithmetic, not a structural guarantee. The
+structural fix is to give the sweeper a deadline — stop after half the stale
+window and reschedule — so the product cannot be got wrong at all. Not built.
+
+### 2. Loading the sanctions list inside a claimed job
+
+`run_screening` called `load_index()`, so the first screening job on a cold
+process paid for loading and normalising 19,393 entries *while already marked
+`running` with a `locked_at` timestamp*. That load time counted against the
+stale threshold. Measured at 0.98s, so the risk was small — but it was the same
+class of bug as the one above, and it interacted with it.
+
+Moved to boot, where nothing is claimed: no job to lose, no lock to expire, and
+a missing or corrupt list kills the process visibly instead of parking jobs one
+at a time.
+
+"No path can cold-load mid-job" is asserted rather than argued: after `preload`,
+every loader is replaced with one that raises, and the handler's exact call is
+made three times. And if it ever does happen anyway, `load_index` now logs a
+warning naming it, because the failure it produces is otherwise invisible.
+
+### 3. Memory: not tight, and the estimate was too low
+
+Measured in the worker container on Linux, the image Heroku builds:
+
+| | RSS |
+| --- | --- |
+| Interpreter + imports | 21 MB |
+| + synthetic fixture (25 entries) | 21 MB |
+| + OFAC from disk (19,393 entries) | 73 MB |
+| + OFAC downloaded and parsed at boot | 86 MB |
+
+86MB against an Eco dyno's 512MB is 17%, with R14 far away. The number to state
+publicly is **86MB at boot**, because that is the peak path in production.
+
+Worth noting the Windows measurement of the same load was 48.9MB. Same code,
+same data, a 24MB difference from the allocator and the platform. Measure where
+it runs.
+
+### What building it turned up
+
+**The local image was not the deployed image.** Docker reads `.dockerignore`,
+not `.gitignore`. `data/ofac_sdn.json` is gitignored, so a Heroku build — which
+builds from what is in git — would never have it, but a build on a developer's
+machine silently included 5.7MB of it. The local container loaded OFAC from disk
+and the boot-download path was never exercised. Adding the file to
+`.dockerignore` made the two identical, and the download path ran on the very
+next build.
+
+**`next build` needed a database.** The pool was constructed at module scope, so
+Next's page-data collection imported it and threw `DATABASE_URL is not set` —
+the build failed, not the app. Invisible locally because `.env` always exists,
+and it would have failed on Heroku too: config vars are deliberately absent
+during a container build, because an artefact that needs production secrets to
+be *produced* is not an artefact. Made lazy behind a `Proxy` so all 26 call
+sites still read `pool.query(...)`.
+
+**Heroku Postgres needs TLS and `pg` did not know.** Its certificate is signed
+by an internal authority Node does not trust, so every page would have 500'd on
+a deploy that built perfectly. `rejectUnauthorized: false` is the accepted
+answer and the cost is stated where it is set: encrypted, not verified — fine
+for synthetic data, not fine for real customers, where the answer is pinning
+Heroku's CA rather than not checking.
+
+**Snapshots churn per restart, not per publication.** Two OFAC downloads six
+hours apart returned the same 19,393 records and the same `published_at` but
+different sha256 digests. `sanctions_snapshots` correctly records those as
+different versions — the bytes really did differ — but it means a row per dyno
+restart, and two concurrent workers can be screening against different
+snapshots. Honest, and not what the table's name suggests.
+
+### The fallback, and why it is loud
+
+Production sets `SANCTIONS_SOURCE=ofac` with `SANCTIONS_FALLBACK=synthetic`: if
+treasury.gov is unreachable the worker starts degraded rather than crash-looping.
+
+That is a genuinely bad trade made deliberately — screening against a 25-entry
+invented list is very close to not screening at all — so it is not allowed to be
+quiet. It logs at ERROR, not INFO. And it is recorded in the *data*, not only
+the log: every match written while degraded points at a snapshot row whose
+source reads `synthetic`, so a case decided during the outage says so on its own
+page, months later, after the logs have rotated away. An auditor asking "what
+was this screened against?" gets an answer from the database.
+
+The default is no fallback at all, because in development a missing list is a
+mistake you want to see immediately, not a mode you want to run in.

@@ -23,6 +23,7 @@ a compliance officer handles the cases that cannot be decided automatically.
 - [The problem this is really about](#the-problem-this-is-really-about)
 - [Architecture](#architecture)
 - [Running it locally](#running-it-locally)
+- [Deploying](#deploying)
 - [What each part does](#what-each-part-does)
 - [Numbers](#numbers)
 - [Limitations — what this does not do](#limitations--what-this-does-not-do)
@@ -287,17 +288,17 @@ Fill the database with six weeks of plausible history:
 cd worker && .venv/Scripts/python seed.py --count 500 --weeks 6
 ```
 
-Run the tests — 171 of them:
+Run the tests — 182 of them:
 
 ```bash
 cd worker && .venv/Scripts/python -m pytest
 ```
 
-123 are pure: no database, no network, no fixtures, because the scoring and
+132 are pure: no database, no network, no fixtures, because the scoring and
 lifecycle logic are functions with no I/O in them. They run on a fresh clone
 with nothing installed but the dependencies.
 
-The other 48 need Postgres, and would be worthless without it — SKIP LOCKED,
+The other 50 need Postgres, and would be worthless without it — SKIP LOCKED,
 the lifecycle trigger, the partial unique indexes and the append-only rules are
 all database guarantees, and a mock of a database proves nothing about them.
 They run against a throwaway database (`DATABASE_URL` with `_test` appended)
@@ -314,6 +315,30 @@ CI runs both on every push, against a real `postgres:16`.
 > which looks like broken application code and is not. Use `npm run build:check`,
 > which builds into a separate directory. If it has already happened: stop the
 > dev server, delete `.next`, start it again.
+
+---
+
+## Deploying
+
+Heroku, as containers: one app, a `web` and a `worker` process type, and a
+release phase that runs the migrations from the worker image. The full runbook —
+config vars and what each one is for, how to confirm the worker is *processing*
+and not merely *running*, measured memory and boot figures — is in
+[docs/deploy-heroku.md](docs/deploy-heroku.md).
+
+Two things there are worth knowing even if you never deploy it:
+
+**The worker does not start by itself.** Heroku starts `web` and leaves every
+other process type at zero. Forget `heroku ps:scale worker=1` and you get a site
+that accepts applications and decides none of them — the most likely way this
+particular deploy goes wrong, and a silent one.
+
+**The sanctions list is downloaded at boot, not baked into the image.** OFAC's
+list is 5.7MB of data that goes stale, so it is gitignored and dockerignored and
+fetched when the worker starts. If that fetch fails, `SANCTIONS_FALLBACK` lets
+the worker run against the committed fixture rather than crash-loop — logged at
+ERROR, and recorded in `sanctions_snapshots`, so any case decided while degraded
+says so on its own page long after the logs have gone.
 
 ---
 

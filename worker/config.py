@@ -40,9 +40,34 @@ BACKOFF_CAP_SECONDS = _float("JOB_BACKOFF_CAP_SECONDS", "3600")
 
 # A job 'running' longer than this is presumed abandoned — its worker died
 # without getting to a failure handler — and is reclaimed.
-STALE_SECONDS = _float("JOB_STALE_SECONDS", "300")
+#
+# THIS NUMBER MUST EXCEED THE LONGEST A LEGITIMATE JOB CAN TAKE. Set it too low
+# and the reaper steals work that is still running, producing exactly the
+# double-processing the queue exists to prevent — a worse failure than the one
+# it fixes.
+#
+# The longest legitimate job is a sweep against an unresponsive vendor:
+#
+#     SWEEP_BATCH_SIZE (25) x VENDOR_TIMEOUT_SECONDS (10) = 250s worst case
+#
+# 600 leaves a 2.4x margin. Raised from 300, which did NOT clear the old batch
+# size of 50 — that combination allowed a 500s sweep against a 300s threshold,
+# and would have had the reaper reclaiming a live sweep after an outage. Found
+# while working out what a Heroku dyno restart does; see docs/decisions.md.
+#
+# The cost of the larger number is recovery latency: a job killed by SIGKILL
+# waits up to STALE_SECONDS + REAP_INTERVAL_SECONDS before being requeued.
+# Correctness wins over latency here, and the value is env-tunable for demos.
+STALE_SECONDS = _float("JOB_STALE_SECONDS", "600")
 
-# How often to look for those.
+# How often to look for those. Runs on a timer inside the worker loop, NOT only
+# at startup, so a job orphaned by a dyno restart is rescued by the workers that
+# are already running rather than waiting for the next deploy.
+#
+# 60s is a deliberate compromise: short enough that it contributes little to
+# recovery latency next to STALE_SECONDS (10% of it), long enough that the extra
+# query is irrelevant — one UPDATE a minute per worker, against an index on
+# (status, locked_at).
 REAP_INTERVAL_SECONDS = _float("JOB_REAP_INTERVAL_SECONDS", "60")
 
 DEFAULT_MAX_ATTEMPTS = _int("JOB_MAX_ATTEMPTS", "5")
@@ -75,7 +100,12 @@ SWEEP_STUCK_MINUTES = _float("SWEEP_STUCK_MINUTES", "10")
 
 # Applications examined per sweep. A cap so one sweep cannot monopolise a worker
 # after an outage has left thousands stuck.
-SWEEP_BATCH_SIZE = _int("SWEEP_BATCH_SIZE", "50")
+#
+# Bounded by STALE_SECONDS, not chosen freely: this number times
+# VENDOR_TIMEOUT_SECONDS is the worst-case duration of a sweep, and that has to
+# stay comfortably under the threshold at which the reaper presumes a job dead.
+# main.py checks the relationship at boot and complains if it stops holding.
+SWEEP_BATCH_SIZE = _int("SWEEP_BATCH_SIZE", "25")
 
 # --- Screening --------------------------------------------------------------
 
@@ -86,6 +116,16 @@ SWEEP_BATCH_SIZE = _int("SWEEP_BATCH_SIZE", "50")
 # opensanctions is richer but CC-BY-NC, so commercial use needs a licence and
 # it is deliberately not the default.
 SANCTIONS_SOURCE = os.environ.get("SANCTIONS_SOURCE") or "synthetic"
+
+# What to load if SANCTIONS_SOURCE cannot be loaded at boot — empty means "do
+# not start", which is the right default for development, where a missing list
+# is a mistake you want to see immediately.
+#
+# Production sets this to 'synthetic' so an unreachable treasury.gov degrades
+# the worker instead of crash-looping it. That is a deliberate trade and a bad
+# one to make silently, so preload() logs it at ERROR and every match recorded
+# while degraded names the fixture as its source in sanctions_snapshots.
+SANCTIONS_FALLBACK = os.environ.get("SANCTIONS_FALLBACK") or ""
 
 # --- Queue retention (the loose end from Phase 2) ---------------------------
 

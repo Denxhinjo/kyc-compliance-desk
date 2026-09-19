@@ -20,6 +20,32 @@ declare global {
   var __kycPool: Pool | undefined;
 }
 
+/**
+ * TLS settings for the connection, or nothing at all locally.
+ *
+ * Heroku Postgres requires TLS and presents a certificate signed by its own
+ * internal authority, which is not in Node's trust store. Left alone, `pg`
+ * rejects it with `self-signed certificate in certificate chain` and every page
+ * 500s — a deploy that builds perfectly and then cannot reach its database.
+ *
+ * `rejectUnauthorized: false` is the accepted answer for Heroku Postgres, and
+ * it is worth being clear about what it costs: the connection is still
+ * encrypted, but the certificate is not verified, so it protects against
+ * passive eavesdropping and not against an active attacker who can already
+ * intercept traffic inside Heroku's network. For a demo holding synthetic data
+ * that is an acceptable trade. For real customer data it would not be — the
+ * answer there is to pin Heroku's CA bundle explicitly rather than to stop
+ * checking.
+ *
+ * Applied only when the URL is not local, so development keeps an unencrypted
+ * connection to a container on the same machine rather than pretending.
+ */
+function sslOptions(connectionString: string) {
+  const isLocal = /@(localhost|127\.0\.0\.1|db)[:/]/.test(connectionString);
+  if (isLocal) return {};
+  return { ssl: { rejectUnauthorized: false } };
+}
+
 function createPool(): Pool {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
@@ -36,14 +62,51 @@ function createPool(): Pool {
     max: 10,
     // Fail fast rather than hanging if the database is unreachable.
     connectionTimeoutMillis: 5_000,
+    ...sslOptions(connectionString),
   });
 }
 
-export const pool: Pool = globalThis.__kycPool ?? createPool();
+/**
+ * The pool, created on first use rather than on import.
+ *
+ * WHY THIS IS LAZY — it is not a micro-optimisation.
+ *
+ * `next build` imports every route module to collect page data. With the pool
+ * built at module scope, that import threw `DATABASE_URL is not set` and the
+ * BUILD failed — not the app, the build. It never showed up in development
+ * because a local `.env` is always there, and it would not have shown up until
+ * the first container build: Heroku does not expose config vars during a
+ * container build either, by design, because a build artefact that needs
+ * production secrets to be produced is not a build artefact.
+ *
+ * Deferring construction to the first query means building needs no database
+ * and running needs no build-time configuration, which is the separation the
+ * twelve-factor "build, release, run" split is actually about.
+ *
+ * The Proxy keeps the export a `Pool`, so all 26 call sites still read
+ * `pool.query(...)` and nothing else in the app had to learn about this.
+ */
+function getPool(): Pool {
+  const existing = globalThis.__kycPool;
+  if (existing) return existing;
 
-if (process.env.NODE_ENV !== "production") {
-  globalThis.__kycPool = pool;
+  const created = createPool();
+  // In development Next.js hot-reloads modules on every save; without this,
+  // each reload would leak the previous pool's connections. In production the
+  // module is evaluated once, but caching here too keeps one code path.
+  globalThis.__kycPool = created;
+  return created;
 }
+
+export const pool: Pool = new Proxy({} as Pool, {
+  get(_target, property) {
+    const actual = getPool();
+    const value = Reflect.get(actual, property, actual);
+    // Methods must keep their `this`, or `pool.query()` calls a detached
+    // function and pg loses the pool it belongs to.
+    return typeof value === "function" ? value.bind(actual) : value;
+  },
+});
 
 export type DbHealth =
   | { ok: true; version: string; serverTime: string; database: string }

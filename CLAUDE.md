@@ -64,7 +64,11 @@ bonus. A working feature I don't understand is a failure.
 
     the same contract is the default, so the repo runs with no vendor account.
 - **Sanctions data**: OpenSanctions (free, open data).
-- **Hosting**: Railway. Local dev via docker-compose.
+- **Hosting**: Heroku, deployed as containers via `heroku.yml` — one app,
+    a `web` and a `worker` process type, and a release phase that runs the
+    migrations. Railway was the original choice; the trial expired before
+    deployment, and Heroku student credits replaced it. Local dev via
+    docker-compose.
 
 Use **raw SQL** in both services (`pg` in TypeScript, `psycopg` in Python).
 
@@ -152,7 +156,7 @@ docker-compose.yml
 6. Sanctions screening + risk scoring + tests
 7. The compliance review desk
 8. Stats page, seed data, demo polish
-9. Deploy to Railway + README
+9. Deploy to Heroku + README
 
 ~~~
 
@@ -427,7 +431,7 @@ stated, so I can publish them honestly.
 
 Start Phase 8: deploy and document.
 
-- Deploy web app, worker and database to Railway
+- Deploy web app, worker and database to Heroku
 - Production env vars and the Didit webhook URL pointed at the live app
 - A README explaining what this is, the architecture, how to run it locally,
     

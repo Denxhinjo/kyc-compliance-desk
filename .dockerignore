@@ -7,3 +7,11 @@
 **/*.pyc
 .git
 .env
+
+# Downloaded sanctions data. Gitignored, so a Heroku build (which builds from
+# what is in git) never has it — and an image built on a developer's machine
+# must not quietly include it either. Otherwise the local image screens against
+# a list the deployed one has to go and fetch, and the boot download path is
+# only ever exercised in production. The worker downloads this at boot.
+data/ofac_sdn.json
+data/opensanctions.json

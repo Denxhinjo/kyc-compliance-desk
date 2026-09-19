@@ -1,9 +1,8 @@
 # The web service.
 #
-# Built from the REPOSITORY ROOT, not from /web — set RAILWAY_DOCKERFILE_PATH
-# to web/Dockerfile on the Railway service. The root context is what lets the
-# image reach /db and /data, and it keeps this file honest about the fact that
-# the two services share a repository even though they share nothing else.
+# Built from the REPOSITORY ROOT, not from /web. heroku.yml sets the context.
+# The root context keeps this file honest about the fact that the two services
+# share a repository even though they share nothing else.
 
 FROM node:22-alpine AS deps
 WORKDIR /app/web
@@ -18,8 +17,8 @@ WORKDIR /app/web
 COPY --from=deps /app/web/node_modules ./node_modules
 COPY web/ ./
 # next.config.ts reads ../.env, which does not exist in the image. dotenv is
-# silent about a missing file, and Railway injects the real values as
-# environment variables, so there is nothing to do here.
+# silent about a missing file, and Heroku injects the real values as config
+# vars, so there is nothing to do here.
 RUN npm run build
 
 FROM node:22-alpine AS run
@@ -33,7 +32,7 @@ COPY --from=build --chown=node:node /app/web/public ./public
 COPY --from=build --chown=node:node /app/web/package.json ./package.json
 COPY --from=build --chown=node:node /app/web/next.config.ts ./next.config.ts
 
-# Railway assigns the port at runtime. Binding to a hardcoded port is the
-# classic reason a deploy builds fine and then never becomes reachable.
+# Heroku assigns $PORT at runtime and routes to it. Binding to a hardcoded port
+# is the classic reason a deploy builds fine and then never becomes reachable.
 EXPOSE 3000
 CMD ["sh", "-c", "npx next start -p ${PORT:-3000} -H 0.0.0.0"]

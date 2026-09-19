@@ -155,11 +155,27 @@ _LOADERS = {
 #: normalising twenty thousand entries on every job would dominate the runtime.
 _cached: SanctionsIndex | None = None
 
+#: Set by preload(). Only used to make an unexpected load LOUD — see below.
+_preloaded = False
+
 
 def load_index(source: str) -> SanctionsIndex:
     global _cached
     if _cached is not None and _cached.source == source:
         return _cached
+
+    if _preloaded:
+        # A cache miss after boot means something changed the source mid-process
+        # or cleared the cache. Neither should be possible in a worker, and the
+        # consequence is a multi-second load INSIDE a claimed job — the thing
+        # preloading exists to prevent. Not fatal, because a screening that runs
+        # slowly beats one that does not run, but it must not pass silently.
+        log.warning(
+            "cold-loading the %r list after boot — a job is about to block on "
+            "this. The preloaded list was %r.",
+            source,
+            _cached.source if _cached else None,
+        )
 
     try:
         loader = _LOADERS[source]
@@ -177,6 +193,101 @@ def load_index(source: str) -> SanctionsIndex:
         _cached.content_hash[:12],
     )
     return _cached
+
+
+def ensure_available(source: str) -> None:
+    """Fetch the list file if the image does not already carry it.
+
+    Only OFAC needs this. The synthetic fixture is committed, and OpenSanctions
+    is deliberately never downloaded automatically because it is CC-BY-NC and
+    obtaining it is a licensing decision for whoever runs this.
+
+    OFAC is gitignored — 5.7MB of data that goes stale, which does not belong in
+    git — so a container image does not contain it and a deployed worker has to
+    go and get it. Downloading at BOOT rather than at build time also means a
+    restarted dyno picks up a newer list without a redeploy, which is a small
+    dent in the staleness limitation rather than a fix for it: nothing refreshes
+    while a worker is up.
+
+    Failures are swallowed here and handled by the caller's fallback. A worker
+    that cannot reach treasury.gov should still start and still screen — against
+    a list it names honestly — rather than crash-looping.
+    """
+    if source != "ofac" or OFAC_PATH.exists():
+        return
+
+    # The parser lives in scripts/download_ofac.py and is shared rather than
+    # duplicated. The repository root is on the path because /data and /scripts
+    # belong to neither service — the same reason /db migrations do.
+    import sys
+
+    root = str(DATA_DIR.parent)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+
+    log.info("no local OFAC list; downloading it before claiming any work")
+    from scripts.download_ofac import main as download_ofac
+
+    if download_ofac() != 0:
+        raise RuntimeError("the OFAC download did not produce a usable list")
+
+
+def preload(source: str, *, fallback: str | None = None) -> SanctionsIndex:
+    """Load the list at worker boot, before any job is claimed.
+
+    WHY THIS IS NOT JUST AN OPTIMISATION
+
+    Loading inside `run_screening` put a multi-second, multi-megabyte operation
+    inside a CLAIMED job. That job is already marked 'running' with a
+    `locked_at` timestamp, so its load time counts against JOB_STALE_SECONDS —
+    the threshold at which the reaper presumes the worker dead and hands the job
+    to someone else. Slow disk, a cold page cache or a larger list all push that
+    the wrong way, and the failure it produces is the queue's worst one: the
+    same job running twice.
+
+    Boot is the right place because nothing is claimed yet. There is no job to
+    lose, no lock to expire, and a missing or corrupt list file kills the
+    process immediately and visibly instead of parking jobs one at a time with
+    a stack trace nobody reads.
+
+    THE FALLBACK
+
+    With no `fallback`, a failure to load propagates and the worker does not
+    start. That is the right default: a worker that cannot load its list would
+    claim screening jobs and fail every one, and a crash loop is far easier to
+    notice than a worker quietly parking everything it touches.
+
+    Production passes `fallback="synthetic"`, which trades that for
+    availability: if treasury.gov is unreachable the worker still starts and
+    still screens, against the committed fixture. That is a REAL DEGRADATION and
+    is treated as one — logged at ERROR, not INFO, because screening against a
+    25-entry invented list is very close to not screening at all. It is
+    survivable here only because this is a demo with synthetic applicants.
+
+    It is not silent in the data either: every match written while degraded
+    points at a `sanctions_snapshots` row whose source reads 'synthetic', so a
+    case decided during the outage says so on the case view and in the audit
+    trail. Nothing has to be inferred from a log that has since rotated away.
+    """
+    global _preloaded
+    try:
+        ensure_available(source)
+        index = load_index(source)
+    except Exception as err:  # noqa: BLE001 — any failure means try the fallback
+        if not fallback or fallback == source:
+            raise
+        log.error(
+            "DEGRADED: could not load the %r sanctions list (%s). Falling back "
+            "to %r. Screening is running against a list that is not a sanctions "
+            "list; every match recorded until this worker restarts will say so.",
+            source,
+            err,
+            fallback,
+        )
+        index = load_index(fallback)
+
+    _preloaded = True
+    return index
 
 
 def ensure_snapshot(conn, index: SanctionsIndex) -> int:

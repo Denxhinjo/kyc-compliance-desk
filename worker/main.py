@@ -30,12 +30,17 @@ import retention  # noqa: F401
 from config import (
     POLL_SECONDS,
     REAP_INTERVAL_SECONDS,
+    SANCTIONS_FALLBACK,
+    SANCTIONS_SOURCE,
     STALE_SECONDS,
+    SWEEP_BATCH_SIZE,
+    VENDOR_TIMEOUT_SECONDS,
     WORKER_ID,
 )
 from db import Database
 from handlers import PermanentError, get_handler
 from jobs import Job, claim_job, claim_job_naively, complete_job, fail_job, reclaim_stale_jobs
+from screening.sources import preload
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +51,53 @@ logging.basicConfig(
 log = logging.getLogger("worker")
 
 _shutdown = False
+
+
+def _resident_mb() -> float | None:
+    """This process's RSS in MB, or None where it cannot be read.
+
+    No dependency: /proc on Linux, which is what Heroku runs. Logged at boot so
+    the number that matters on a 512MB Eco dyno — R14 starts swapping there — is
+    visible in `heroku logs` rather than something anyone has to go and measure.
+    """
+    try:
+        with open("/proc/self/status", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def _check_timeouts() -> None:
+    """Complain if the reaper could reclaim a job that is still running.
+
+    The longest legitimate job is a sweep against an unresponsive vendor, and
+    its worst case is a simple product. If that ever reaches STALE_SECONDS the
+    reaper starts handing live sweeps to other workers, which is the exact
+    double-processing the whole queue design exists to prevent.
+
+    Checked at boot rather than left as a comment because it is a relationship
+    between three environment variables, and any one of them can be changed on
+    Heroku by someone who has not read this file.
+    """
+    worst_case = SWEEP_BATCH_SIZE * VENDOR_TIMEOUT_SECONDS
+    if worst_case >= STALE_SECONDS:
+        log.error(
+            "MISCONFIGURED: a sweep can take up to %.0fs (SWEEP_BATCH_SIZE %d x "
+            "VENDOR_TIMEOUT_SECONDS %.0fs) but JOB_STALE_SECONDS is %.0fs. The "
+            "reaper will reclaim sweeps that are still running and they will be "
+            "processed twice. Raise JOB_STALE_SECONDS or lower SWEEP_BATCH_SIZE.",
+            worst_case, SWEEP_BATCH_SIZE, VENDOR_TIMEOUT_SECONDS, STALE_SECONDS,
+        )
+    else:
+        log.info(
+            "timeouts: worst-case job %.0fs, stale after %.0fs (%.1fx margin), "
+            "reaped every %.0fs",
+            worst_case, STALE_SECONDS, STALE_SECONDS / worst_case,
+            REAP_INTERVAL_SECONDS,
+        )
 
 
 def _request_shutdown(signum: int, _frame: FrameType | None) -> None:
@@ -124,6 +176,25 @@ def main() -> int:
     if args.naive:
         log.warning("NAIVE CLAIM MODE — no row locking. Jobs will be processed twice.")
     log.info("worker %s starting (poll %.1fs)", WORKER_ID, POLL_SECONDS)
+
+    _check_timeouts()
+
+    # Load the sanctions list BEFORE claiming anything. Deliberately not wrapped
+    # in a try: a worker that cannot load its list would claim screening jobs and
+    # fail every one, and a crash loop is far easier to notice than a worker
+    # quietly parking everything it touches. See screening/sources.preload.
+    started = time.monotonic()
+    index = preload(SANCTIONS_SOURCE, fallback=SANCTIONS_FALLBACK)
+    resident = _resident_mb()
+    log.info(
+        "sanctions list ready: %d entries from %r in %.2fs%s",
+        len(index),
+        # index.source, not SANCTIONS_SOURCE: if the fallback was taken these
+        # differ, and the log must say what is actually loaded.
+        index.source,
+        time.monotonic() - started,
+        f", RSS {resident:.0f}MB" if resident is not None else "",
+    )
 
     db = Database()
 
