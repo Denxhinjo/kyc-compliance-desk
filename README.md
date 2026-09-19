@@ -372,13 +372,27 @@ decision          rejected, by staff:officer@example.com, score 60
                   sha256 3344c6ea837c2d74ba19688be26a49b06d839031856aa6733b4413553996a950
 ```
 
-That hash is the sha256 of the data file on disk, so anyone holding the same
-file can recompute it and confirm. The officer sees the same line on the case,
-beside the matches.
+The officer sees the same line on the case, beside the matches.
 
-This answers *"was this person screened against the list as it stood that
-day?"* — which is what an auditor asks. It does **not** make the list fresh;
-see the limitations.
+**What that hash does and does not prove.** It is the sha256 of the derived
+JSON file the worker loaded. It makes the pipeline **tamper-evident within this
+system**: the file loaded is the file recorded, and neither the snapshot row nor
+the link from a match can be altered afterwards without the digest ceasing to
+agree.
+
+It is **not** independent verification, for two reasons worth being exact
+about. The file is gitignored and not archived, so in three months nobody will
+hold the bytes that produced this digest — OFAC's publication will have moved
+on. And the digest covers *our* transformed JSON rather than OFAC's XML, so
+even a reader holding the original source file could not reproduce it without
+running this exact parser. Hashing the source artifact as well would fix the
+second half; a WORM archive of the source file would fix the first. Neither is
+built.
+
+So: this answers *"was this person screened against the list this system
+recorded, and has anything been altered since?"* — which is a real and useful
+question. It does not answer *"was that file genuinely OFAC's publication of
+2026-09-18?"*, and it does not make the list fresh. See the limitations.
 
 Risk scoring lives in [`worker/scoring.py`](worker/scoring.py) as **pure
 functions**: no database, no network, no clock. Every input arrives as an
@@ -532,6 +546,17 @@ approach, not a system that should go near a real customer. Specifically:
   — but **visible is not fixed**. Nothing reloads the list, and nothing warns
   when the one in memory has aged. A worker up for three weeks is screening
   against a three-week-old list and will tell you so only if you look.
+- **The list file is not archived.** Snapshots record a sha256 of the file that
+  was loaded, but the file itself is gitignored and kept nowhere. The digest is
+  therefore tamper-evidence within this system rather than something a third
+  party can independently check — in three months the bytes are gone. A real
+  deployment would archive the source artifact to WORM storage, which is the
+  same argument this project already makes about audit records.
+- **The hash is recorded, not verified.** Nothing compares it against a known
+  good value, so a truncated or swapped file produces a fresh snapshot row and
+  screening continues silently against whatever it contains. The cross-checks
+  that would catch it — the publisher's own declared record count, and a sanity
+  comparison against the previous snapshot — are not implemented.
 - **951 single-token OFAC entries are unmatched by construction**, because
   matching them against every applicant sharing a first name produced a 31.8%
   false rejection rate. Real systems resolve mononyms with passport numbers and

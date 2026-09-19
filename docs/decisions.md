@@ -1804,10 +1804,24 @@ when it was first loaded. `screening_results.snapshot_id` points at it.
 
 Four decisions inside that are worth recording.
 
-**The hash is of the file, not the parsed entries.** Anyone holding the same
-file can recompute it and confirm. Hashing parsed entries would have made the
-hash a statement about our parser rather than about the vendor's data — the
-wrong thing to attest to.
+**The hash is of the file, not the parsed entries.** Hashing in-memory entries
+would have made the digest a statement about our parser's output at runtime,
+which is harder for anyone to check than a file on disk.
+
+But the claim I first wrote around this was overstated, and the correction is
+worth recording rather than quietly editing. I said "anyone holding the same
+file can recompute it and confirm", which implies independent verification. It
+does not provide that. The file is gitignored and never archived, so in three
+months the bytes are gone and OFAC's publication has moved on. And the digest
+covers our *derived* JSON, not OFAC's XML — so even a reader holding the
+original source could not reproduce it without running this exact parser.
+
+What the digest actually provides is **tamper-evidence within this system**:
+the file loaded is the file recorded, and nothing has been altered since. That
+is genuinely useful and it is a smaller claim. Hashing the source XML as well
+would restore external verifiability for OFAC specifically; archiving the
+source artifact to WORM storage would make it durable. Neither is built, and
+the README now says so.
 
 **`published_at` is nullable, and the synthetic fixture has none.** It is
 fabricated and has no publisher. Inventing a date would make a made-up list look
