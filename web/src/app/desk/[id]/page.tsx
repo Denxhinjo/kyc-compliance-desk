@@ -54,6 +54,15 @@ interface Decision {
   decided_at: string;
 }
 
+/** Which version of the sanctions list produced the matches on this case. */
+interface Snapshot {
+  source: string;
+  published_at: string | null;
+  content_hash: string;
+  record_count: number;
+  downloaded_at: string;
+}
+
 interface AuditRow {
   id: string;
   occurred_at: string;
@@ -71,7 +80,8 @@ export default async function CasePage({
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
 
-  const [appResult, matchResult, decisionResult, auditResult] = await Promise.all([
+  const [appResult, matchResult, decisionResult, snapshotResult, auditResult] =
+    await Promise.all([
     pool.query<Application>(
       `select id, status, full_name, date_of_birth::text, address_line1,
               address_line2, address_city, address_postcode, address_country,
@@ -93,6 +103,17 @@ export default async function CasePage({
          from decisions where application_id = $1 order by id`,
       [id],
     ),
+    pool.query<Snapshot>(
+      // The list version behind this case's matches. Joined through
+      // screening_results rather than read from applications, because it is a
+      // property of the screening run, not of the applicant.
+      `select distinct s.source, s.published_at::text, s.content_hash,
+              s.record_count, s.downloaded_at::text
+         from screening_results r
+         join sanctions_snapshots s on s.id = r.snapshot_id
+        where r.application_id = $1`,
+      [id],
+    ),
     pool.query<AuditRow>(
       // Ordered by id, not occurred_at: several events written in one
       // transaction share a timestamp, because now() is the transaction's
@@ -101,9 +122,10 @@ export default async function CasePage({
          from audit_events where application_id = $1 order by id`,
       [id],
     ),
-  ]);
+    ]);
 
   const application = appResult.rows[0];
+  const snapshot = snapshotResult.rows[0];
   if (!application) notFound();
 
   const verdict = decisionResult.rows.find(
@@ -280,6 +302,34 @@ export default async function CasePage({
               </tbody>
             </table>
             </div>
+          )}
+          {/* Which list, and which version of it. Without this the matches
+              above are unprovable months later: an auditor asking "was this
+              person screened against the list as it stood that day?" needs a
+              publication date, not just the word "OFAC". */}
+          {snapshot ? (
+            <p className="provenance">
+              Screened against <strong>{snapshot.source.toUpperCase()}</strong>
+              {snapshot.published_at ? (
+                <>
+                  {" "}published <strong>{snapshot.published_at}</strong>
+                </>
+              ) : (
+                <> (no publication date — this source does not publish one)</>
+              )}{" "}
+              · {snapshot.record_count.toLocaleString()} entries · loaded{" "}
+              {snapshot.downloaded_at.slice(0, 16)}
+              <br />
+              <span className="mono dim small">
+                sha256 {snapshot.content_hash.slice(0, 24)}…
+              </span>
+            </p>
+          ) : (
+            <p className="provenance unknown">
+              The list version behind these matches was not recorded. Rows
+              written before list versioning was added carry no snapshot, and a
+              value has deliberately not been invented for them.
+            </p>
           )}
           <p className="dim small">
             A strength is a name similarity, not a verdict. Weak matches are

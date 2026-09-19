@@ -59,6 +59,35 @@ def _full_name(first: str | None, last: str | None) -> str:
     return " ".join(part for part in (first, last) if part).strip()
 
 
+def publication_info(root, ns: dict[str, str]) -> dict[str, str | None]:
+    """OFAC's own version stamp for this file.
+
+    <publshInformation> (their spelling) carries Publish_Date and Record_Count.
+    This used to be parsed and thrown away, which meant a screening run could
+    never say WHICH version of the list it had used — the question an auditor
+    actually asks. It is now written into the output file and, from there, into
+    sanctions_snapshots.
+    """
+    info = root.find("sdn:publshInformation", ns)
+    if info is None:
+        return {"published_at": None, "record_count": None}
+
+    raw_date = _text(info, "sdn:Publish_Date", ns)
+    published_at = None
+    if raw_date:
+        # OFAC publishes MM/DD/YYYY. Stored as ISO so it sorts and compares.
+        try:
+            month, day, year = raw_date.split("/")
+            published_at = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+        except ValueError:
+            print(f"  warning: could not parse Publish_Date {raw_date!r}", file=sys.stderr)
+
+    return {
+        "published_at": published_at,
+        "record_count": _text(info, "sdn:Record_Count", ns),
+    }
+
+
 def parse(xml_bytes: bytes) -> list[dict]:
     root = ElementTree.fromstring(xml_bytes)
     ns = _namespace_of(root)
@@ -137,6 +166,8 @@ def main() -> int:
         return 1
 
     print(f"parsing {len(raw) / 1_048_576:.1f} MB")
+    root = ElementTree.fromstring(raw)
+    publication = publication_info(root, _namespace_of(root))
     entries = parse(raw)
 
     if not entries:
@@ -160,6 +191,11 @@ def main() -> int:
                     "17 U.S.C. 105. Free to use and redistribute."
                 ),
                 "url": SDN_XML_URL,
+                # OFAC's own version stamp. The worker copies these into
+                # sanctions_snapshots so a decision can be traced back to the
+                # exact list version that informed it.
+                "published_at": publication["published_at"],
+                "publisher_record_count": publication["record_count"],
                 "entries": entries,
             },
             indent=1,
@@ -169,6 +205,8 @@ def main() -> int:
 
     with_aliases = sum(1 for e in entries if e["aliases"])
     print(f"wrote {len(entries)} entries to {OUTPUT}")
+    print(f"  published {publication['published_at'] or 'unknown'}"
+          f" · OFAC says {publication['record_count'] or '?'} records")
     print(f"  {with_aliases} have at least one alias")
     print("\nSet SANCTIONS_SOURCE=ofac in .env to screen against it.")
     return 0

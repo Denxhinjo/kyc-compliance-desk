@@ -421,3 +421,21 @@ wants partitioning rather than deletion.
 **Skeleton screen.** A loading placeholder shaped like the content that is
 coming, rather than a spinner. Keeps the layout from jumping when data arrives
 — which matters most on a screen someone opens hundreds of times a day.
+
+## Added with migration 018
+
+**Provenance.** Being able to say where a piece of data came from and which
+version of it was used. For screening, the difference between "we checked OFAC"
+and "we checked OFAC as published on 2026-09-18, sha256 3344c6ea…".
+
+**Content hash.** A cryptographic digest of a file, used as its identity. Two
+runs with the same hash screened against exactly the same content, whatever
+either one called it — and anyone holding the file can recompute it, so it is an
+attestation rather than a label.
+
+**Snapshot.** A recorded version of an external dataset at the moment it was
+used. Lets a decision be reconstructed later even though the source has moved on.
+
+**Staleness.** The gap between when a list was published and when it is being
+relied upon. Recording both dates makes it measurable; measuring it is not the
+same as preventing it.

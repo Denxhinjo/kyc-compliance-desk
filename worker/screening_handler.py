@@ -33,7 +33,7 @@ from scoring import (
     ScreeningHit,
     score_application,
 )
-from screening.sources import load_index
+from screening.sources import ensure_snapshot, load_index
 
 log = logging.getLogger("worker.screening")
 
@@ -62,12 +62,18 @@ def run_screening(conn: psycopg.Connection, job: Job) -> None:
 
     index = load_index(SANCTIONS_SOURCE)
 
+    # Record WHICH version of the list this run used, before using it. Every
+    # match written below points at this row, so a decision can be traced back
+    # to the exact list content that informed it — the question an auditor
+    # actually asks, and one that could not be answered before migration 018.
+    snapshot_id = ensure_snapshot(conn, index)
+
     matches = index.search(
         application["full_name"],
         date_of_birth=str(application["date_of_birth"]),
     )
 
-    _store_matches(conn, application_id, index.source, matches)
+    _store_matches(conn, application_id, index.source, matches, snapshot_id)
 
     profile = ApplicantProfile(
         country=application["address_country"],
@@ -89,7 +95,9 @@ def run_screening(conn: psycopg.Connection, job: Job) -> None:
     # gathers facts; everything below records consequences.
     assessment = score_application(profile)
 
-    _store_assessment(conn, application, assessment, len(matches), index.source)
+    _store_assessment(
+        conn, application, assessment, len(matches), index.source, snapshot_id
+    )
     _route(conn, application, assessment)
 
 
@@ -115,7 +123,11 @@ def _load_application(
 
 
 def _store_matches(
-    conn: psycopg.Connection, application_id: str, source: str, matches: list
+    conn: psycopg.Connection,
+    application_id: str,
+    source: str,
+    matches: list,
+    snapshot_id: int,
 ) -> None:
     """Write every candidate, including the weak ones.
 
@@ -133,8 +145,8 @@ def _store_matches(
                 """
                 insert into screening_results
                     (application_id, source, match_type, list_name, matched_name,
-                     matched_entity_id, match_score, payload)
-                values (%s, %s, %s, %s, %s, %s, %s, %s)
+                     matched_entity_id, match_score, payload, snapshot_id)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict (application_id, source, matched_entity_id)
                     where matched_entity_id is not null
                 do nothing
@@ -156,6 +168,7 @@ def _store_matches(
                             "date_of_birth_conflict": match.date_of_birth_conflict,
                         }
                     ),
+                    snapshot_id,
                 ),
             )
 
@@ -166,6 +179,7 @@ def _store_assessment(
     assessment: RiskAssessment,
     candidate_count: int,
     source: str,
+    snapshot_id: int,
 ) -> None:
     """Record the score, the signals, the thresholds and the ruleset version.
 
@@ -175,6 +189,9 @@ def _store_assessment(
     payload = assessment.as_dict()
     payload["source"] = source
     payload["candidates_considered"] = candidate_count
+    # Stored alongside risk_ruleset_version, which is the point: both halves of
+    # the decision's input — the rules and the list — are now versioned.
+    payload["sanctions_snapshot_id"] = snapshot_id
 
     unchanged = (
         application["risk_score"] == assessment.score
@@ -217,6 +234,7 @@ def _store_assessment(
             "routing": assessment.routing,
             "ruleset_version": assessment.ruleset_version,
             "source": source,
+            "sanctions_snapshot_id": snapshot_id,
             "candidates": candidate_count,
             # The reasons, not just the number. Phase 6 reads these.
             "reasons": list(assessment.reasons),

@@ -37,6 +37,7 @@ Three sections carry most of the reasoning:
 | [6 — The review desk](#phase-6--the-compliance-review-desk) | What an officer is actually doing, and how two of them cannot decide one case |
 | [7 — Seed data, stats and retention](#phase-7--seed-data-stats-retention-and-states) | Making synthetic data that does not look synthetic; publishing numbers honestly |
 | [Correction — the lifecycle belongs in the schema](#correction-the-lifecycle-belongs-in-the-schema-migration-017) | Phase 4 broke the project's own stated principle; migration 017 fixes it |
+| [Correction — version the sanctions list](#correction-version-the-sanctions-list-migration-018) | The rules were versioned and the list was not; what that fixes and what it pointedly does not |
 
 ## A note on the things that were wrong
 
@@ -1775,3 +1776,113 @@ mirror-versus-schema comparison.
 lifecycle, and a live application still runs
 `started → submitted → screening → referred` through the real webhook, worker
 and scoring path.
+
+---
+
+## Correction: version the sanctions list (migration 018)
+
+### The inconsistency
+
+`screening_results.source` said `'ofac'`. It did not say *which* OFAC.
+
+So the question an auditor actually asks — **"was this person screened against
+the list as it stood on the day you approved them?"** — was unanswerable. Not
+hard to answer: unanswerable. The data did not contain it.
+
+What makes that worth fixing rather than merely noting is the inconsistency
+with everything else this project does. A decision has two inputs: the rules
+and the list. Phase 5 versioned the rules with some care — every scored
+application stores `risk_ruleset_version` and the thresholds in force,
+precisely so a decision can be reconstructed after the rules have moved. The
+other half of the input carried no version at all.
+
+### What was built
+
+`sanctions_snapshots` — one row per distinct list version, holding the source,
+the publisher's own publication date, a sha256 of the file, the entity count and
+when it was first loaded. `screening_results.snapshot_id` points at it.
+
+Four decisions inside that are worth recording.
+
+**The hash is of the file, not the parsed entries.** Anyone holding the same
+file can recompute it and confirm. Hashing parsed entries would have made the
+hash a statement about our parser rather than about the vendor's data — the
+wrong thing to attest to.
+
+**`published_at` is nullable, and the synthetic fixture has none.** It is
+fabricated and has no publisher. Inventing a date would make a made-up list look
+like a dated authority, which is precisely the opposite of what the table is
+for.
+
+**Existing rows were not backfilled.** Screenings written before this migration
+ran against a list whose version we genuinely do not know. Filling in a
+plausible value would fabricate exactly the provenance the table exists to
+establish. `NULL` reads as "unknown", which is true, and the case view says so
+in those words rather than leaving a blank space.
+
+**The snapshot is registered by the worker at load time, not by the
+downloader.** The brief suggested the downloader, which is the obvious place —
+it is what fetches the file. But the downloader only ever sees OFAC. The
+synthetic fixture is never downloaded at all, and a file copied in by hand is
+downloaded by nothing. Registering when the worker *loads* a list means every
+list actually screened against has a row, whatever its provenance, and it keeps
+`DATABASE_URL` out of a standalone script. The downloader's job became
+preserving OFAC's `Publish_Date` and `Record_Count` — which it had been parsing
+and discarding — into the file it writes.
+
+`ON CONFLICT DO NOTHING` against a unique `(source, content_hash)`: identical
+content is the same snapshot however many times it is loaded. Restarting a
+worker must not create a new row and make it look as though the list changed.
+
+### What this does NOT fix, stated plainly
+
+**Staleness.** The worker still loads the list once per process and never
+refreshes it. A worker up for three weeks is screening against a three-week-old
+list.
+
+This migration makes that **visible** — a snapshot row with an old publication
+date next to a recent decision is readable evidence — and visible is a genuine
+improvement over invisible. It is not the same as fixed. Nothing reloads the
+list, and nothing warns when the one in memory has aged.
+
+The two halves are worth keeping apart in the mind, because it is easy to let
+the fixed one make the unfixed one sound solved:
+
+| | Before | After |
+| --- | --- | --- |
+| Can you prove which list screened a case? | No | **Yes** |
+| Is the list current? | Not necessarily | Still not necessarily |
+
+The README's limitations section keeps staleness, reworded to say exactly that.
+A TTL and a background reload are the fix, and they are deliberately not in this
+change.
+
+### The chain, end to end
+
+```
+DECISION       ELLISSA HOLDING — rejected by staff:officer@example.com, score 60
+RULES          ruleset 2026-09-1, thresholds {approve <20, reject >=80}
+MATCH          OFAC SDN, "ELLISSA HOLDING", 100%, snapshot 1
+LIST VERSION   ofac, published 2026-09-18, 19,393 entries,
+               sha256 3344c6ea837c2d74ba19688be26a49b06d839031856aa6733b4413553996a950
+               loaded 2026-09-19 13:24
+```
+
+The hash was verified against the file on disk independently of the database:
+`sha256(data/ofac_sdn.json)` produces the same digest. That is what makes it an
+attestation rather than a label — a reader can check it without trusting us.
+
+On the case view the officer sees one line beside the matches:
+
+> Screened against **OFAC** published **2026-09-18** · 19,393 entries · loaded
+> 2026-09-19 13:24 · sha256 3344c6ea837c2d74ba19688b…
+
+and, where the snapshot is unknown, a differently-coloured line saying so and
+saying why no value was invented.
+
+### Note on the gap between the two dates
+
+`published_at` is the vendor's version. `downloaded_at` is when we first loaded
+it. The gap between them *is* the staleness, and having both recorded means it
+can be measured rather than guessed — which is what the eventual fix will need
+in order to alarm on anything.

@@ -666,3 +666,16 @@ kbd {
   .chart { overflow-x: auto; }
   .chart-col { min-width: 14px; }
 }
+
+/* Which list version produced the matches on a case. Set apart from the
+   explanatory small print below it, because it is evidence rather than
+   commentary — an auditor reads this, not the advice. */
+.provenance {
+  background: #11131a;
+  border-left: 3px solid #2f6b52;
+  border-radius: 0 4px 4px 0;
+  font-size: 12px;
+  margin: 10px 0 6px;
+  padding: 8px 12px;
+}
+.provenance.unknown { border-left-color: #6b5416; color: var(--warn-text); }

@@ -75,7 +75,7 @@ from scoring import (
     ScreeningHit,
     score_application,
 )
-from screening.sources import load_index
+from screening.sources import ensure_snapshot, load_index
 
 # ---------------------------------------------------------------------------
 # The arrival model
@@ -365,13 +365,17 @@ def main() -> int:
             )
             return 1
 
+        # Seeded screening points at a real snapshot too, so the demo data is
+        # traceable in exactly the same way live data is.
+        snapshot_id = ensure_snapshot(conn, index)
+
         arrivals = sample_arrivals(args.count, args.weeks, rng)
         counts = {"approved": 0, "rejected": 0, "referred_pending": 0,
                   "referred_decided": 0, "incomplete": 0}
 
         for created_at in arrivals:
             applicant = make_applicant(rng, today, listed_names)
-            _seed_one(conn, rng, applicant, created_at, index, counts)
+            _seed_one(conn, rng, applicant, created_at, index, counts, snapshot_id)
 
     print(f"\nseeded {args.count} applicants over {args.weeks} weeks")
     for key, value in counts.items():
@@ -380,7 +384,7 @@ def main() -> int:
     return 0
 
 
-def _seed_one(conn, rng, applicant, created_at, index, counts) -> None:
+def _seed_one(conn, rng, applicant, created_at, index, counts, snapshot_id) -> None:
     """One applicant's whole history, written in the order it happened."""
     with conn.transaction():
         with conn.cursor() as cur:
@@ -449,7 +453,9 @@ def _seed_one(conn, rng, applicant, created_at, index, counts) -> None:
             applicant.full_name, date_of_birth=str(applicant.date_of_birth)
         )
         screened_at = vendor_at + timedelta(seconds=rng.uniform(0.4, 4.0))
-        _store_matches(conn, application_id, index.source, matches, screened_at)
+        _store_matches(
+            conn, application_id, index.source, matches, screened_at, snapshot_id
+        )
 
         assessment = score_application(
             ApplicantProfile(
@@ -472,6 +478,7 @@ def _seed_one(conn, rng, applicant, created_at, index, counts) -> None:
         stored = assessment.as_dict()
         stored["source"] = index.source
         stored["candidates_considered"] = len(matches)
+        stored["sanctions_snapshot_id"] = snapshot_id
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -588,15 +595,16 @@ def _decision(conn, application_id, outcome, by, reason, score, at) -> None:
         )
 
 
-def _store_matches(conn, application_id, source, matches, at) -> None:
+def _store_matches(conn, application_id, source, matches, at, snapshot_id) -> None:
     for match in matches:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 insert into screening_results
                     (application_id, source, match_type, list_name, matched_name,
-                     matched_entity_id, match_score, payload, screened_at)
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     matched_entity_id, match_score, payload, screened_at,
+                     snapshot_id)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict (application_id, source, matched_entity_id)
                     where matched_entity_id is not null
                 do nothing
@@ -609,7 +617,7 @@ def _store_matches(conn, application_id, source, matches, at) -> None:
                         "countries": list(match.entry.countries),
                         "listed_date_of_birth": match.entry.date_of_birth,
                         "date_of_birth_conflict": match.date_of_birth_conflict}),
-                 at),
+                 at, snapshot_id),
             )
 
 

@@ -23,9 +23,11 @@ ON LICENSING, because it is a real constraint and not a footnote:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from .index import ListEntry, SanctionsIndex, build_index
 
@@ -36,6 +38,30 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 SYNTHETIC_PATH = DATA_DIR / "synthetic_sanctions.json"
 OFAC_PATH = DATA_DIR / "ofac_sdn.json"
 OPENSANCTIONS_PATH = DATA_DIR / "opensanctions.json"
+
+
+def _file_identity(path: Path) -> tuple[str, str | None]:
+    """The hash of a list file, and the publisher's date if it carries one.
+
+    Hashing the FILE rather than the parsed entries, so anyone holding the same
+    file can recompute this and confirm what was screened against. Parsed
+    entries would depend on our parser, which makes the hash a statement about
+    our code rather than about the vendor's data.
+    """
+    raw = path.read_bytes()
+    content_hash = hashlib.sha256(raw).hexdigest()
+
+    published_at: str | None = None
+    try:
+        payload: Any = json.loads(raw)
+        if isinstance(payload, dict):
+            published_at = payload.get("published_at")
+    except json.JSONDecodeError:
+        # A line-delimited export (OpenSanctions) is not one JSON object. The
+        # hash still works, which is the part that matters.
+        pass
+
+    return content_hash, published_at
 
 
 def _entry_from_json(raw: dict) -> ListEntry:
@@ -53,7 +79,10 @@ def _entry_from_json(raw: dict) -> ListEntry:
 def load_synthetic(path: Path = SYNTHETIC_PATH) -> SanctionsIndex:
     payload = json.loads(path.read_text(encoding="utf-8"))
     entries = [_entry_from_json(raw) for raw in payload["entries"]]
-    return build_index(entries, source="synthetic")
+    content_hash, published_at = _file_identity(path)
+    return build_index(
+        entries, source="synthetic", content_hash=content_hash, published_at=published_at
+    )
 
 
 def load_ofac(path: Path = OFAC_PATH) -> SanctionsIndex:
@@ -65,7 +94,10 @@ def load_ofac(path: Path = OFAC_PATH) -> SanctionsIndex:
         )
     payload = json.loads(path.read_text(encoding="utf-8"))
     entries = [_entry_from_json(raw) for raw in payload["entries"]]
-    return build_index(entries, source="ofac")
+    content_hash, published_at = _file_identity(path)
+    return build_index(
+        entries, source="ofac", content_hash=content_hash, published_at=published_at
+    )
 
 
 def load_opensanctions(path: Path = OPENSANCTIONS_PATH) -> SanctionsIndex:
@@ -104,7 +136,13 @@ def load_opensanctions(path: Path = OPENSANCTIONS_PATH) -> SanctionsIndex:
                     date_of_birth=birth_dates[0] if birth_dates else None,
                 )
             )
-    return build_index(entries, source="opensanctions")
+    content_hash, published_at = _file_identity(path)
+    return build_index(
+        entries,
+        source="opensanctions",
+        content_hash=content_hash,
+        published_at=published_at,
+    )
 
 
 _LOADERS = {
@@ -131,5 +169,56 @@ def load_index(source: str) -> SanctionsIndex:
         ) from None
 
     _cached = loader()
-    log.info("loaded %d entries from the %s list", len(_cached), source)
+    log.info(
+        "loaded %d entries from the %s list (published %s, sha256 %s)",
+        len(_cached),
+        source,
+        _cached.published_at or "unknown",
+        _cached.content_hash[:12],
+    )
     return _cached
+
+
+def ensure_snapshot(conn, index: SanctionsIndex) -> int:
+    """Record which list version this is, and return its id.
+
+    Called by the screening handler rather than by the downloader, deliberately.
+    The downloader only ever sees OFAC; the synthetic fixture is never
+    downloaded at all, and a file copied in by hand is downloaded by nothing.
+    Registering at LOAD time means every list the worker actually screens
+    against has a row, whatever its provenance — and it keeps DATABASE_URL out
+    of a standalone script.
+
+    ON CONFLICT DO NOTHING against the unique (source, content_hash): identical
+    content is the same snapshot however many times it is loaded, so restarting
+    a worker must not create a new row and make it look as though the list
+    changed.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into sanctions_snapshots
+                (source, published_at, content_hash, record_count)
+            values (%s, %s, %s, %s)
+            on conflict (source, content_hash) do nothing
+            returning id
+            """,
+            (index.source, index.published_at, index.content_hash, len(index)),
+        )
+        row = cur.fetchone()
+        if row is not None:
+            log.info(
+                "registered sanctions snapshot %s: %s published %s, %d entries",
+                row[0],
+                index.source,
+                index.published_at or "unknown",
+                len(index),
+            )
+            return row[0]
+
+        # Already registered. Read back the id we conflicted with.
+        cur.execute(
+            "select id from sanctions_snapshots where source = %s and content_hash = %s",
+            (index.source, index.content_hash),
+        )
+        return cur.fetchone()[0]

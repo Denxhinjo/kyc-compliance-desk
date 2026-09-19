@@ -359,6 +359,27 @@ Three list sources behind one interface, chosen by `SANCTIONS_SOURCE`:
 | `ofac` | **public domain** — a US Government work, 17 U.S.C. § 105 | real data, 19,385 entries; `python scripts/download_ofac.py` |
 | `opensanctions` | **CC-BY-NC** — commercial use needs a licence | supported, documented, deliberately not shipped |
 
+Every screening run records **which version of the list it used** — source,
+the publisher's own publication date, a sha256 of the file, and the entity
+count — and every match points at that snapshot. So a decision can be traced
+back to the exact list content that informed it:
+
+```
+decision          rejected, by staff:officer@example.com, score 60
+  ruleset         2026-09-1, thresholds {approve <20, reject >=80}
+  match           OFAC SDN, "ELLISSA HOLDING", 100%
+  list version    ofac, published 2026-09-18, 19,393 entries
+                  sha256 3344c6ea837c2d74ba19688be26a49b06d839031856aa6733b4413553996a950
+```
+
+That hash is the sha256 of the data file on disk, so anyone holding the same
+file can recompute it and confirm. The officer sees the same line on the case,
+beside the matches.
+
+This answers *"was this person screened against the list as it stood that
+day?"* — which is what an auditor asks. It does **not** make the list fresh;
+see the limitations.
+
 Risk scoring lives in [`worker/scoring.py`](worker/scoring.py) as **pure
 functions**: no database, no network, no clock. Every input arrives as an
 argument, including the thresholds.
@@ -505,11 +526,12 @@ approach, not a system that should go near a real customer. Specifically:
   obligations require rescreening the entire book whenever lists change — a
   person can be sanctioned the day after you approve them.
 - **The list is loaded once per process and never refreshed.** A long-running
-  worker screens against the list as it stood when it started. Sanctions lists
-  change daily.
-- **No record of which list version screened a case.** An auditor asking "was
-  this person screened against the list as it stood that day?" cannot be
-  answered from this data.
+  worker screens against the list as it stood when it started, and sanctions
+  lists change daily. This is now *visible* rather than invisible — every case
+  records which list version screened it, so a stale one is readable evidence
+  — but **visible is not fixed**. Nothing reloads the list, and nothing warns
+  when the one in memory has aged. A worker up for three weeks is screening
+  against a three-week-old list and will tell you so only if you look.
 - **951 single-token OFAC entries are unmatched by construction**, because
   matching them against every applicant sharing a first name produced a 31.8%
   false rejection rate. Real systems resolve mononyms with passport numbers and

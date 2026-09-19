@@ -47,6 +47,7 @@ Migrations arrive in Phase 1.
 | `015_review_queue.sql` | Indexes for the review desk's pending queue. |
 | `016_job_retention.sql` | A second recurring job type, and an index for retention. |
 | `017_lifecycle_enforcement.sql` | The application lifecycle, moved out of Python and into the schema. |
+| `018_sanctions_snapshots.sql` | Which version of the sanctions list screened each case. |
 
 ## The runner
 

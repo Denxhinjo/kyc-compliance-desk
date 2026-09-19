@@ -148,6 +148,13 @@ class SanctionsIndex:
     entries: tuple[ListEntry, ...]
     source: str = "synthetic"
 
+    #: sha256 of the file this was loaded from. The identity of the list: two
+    #: runs with the same hash screened against exactly the same content.
+    content_hash: str = ""
+    #: The publisher's own version stamp, where they publish one. None for the
+    #: synthetic fixture, which is fabricated and has no publisher.
+    published_at: str | None = None
+
     #: Every searchable spelling, flattened: (normalised, original, entry).
     #: Built once so a screening run does not renormalise the whole list.
     _searchable: list[tuple[str, str, ListEntry]] = field(default_factory=list, repr=False)
@@ -240,5 +247,16 @@ def _dates_conflict(applicant: str | None, listed: str | None) -> bool:
     return applicant_year != listed_year
 
 
-def build_index(entries: Iterable[ListEntry], source: str) -> SanctionsIndex:
-    return SanctionsIndex(entries=tuple(entries), source=source)
+def build_index(
+    entries: Iterable[ListEntry],
+    source: str,
+    *,
+    content_hash: str = "",
+    published_at: str | None = None,
+) -> SanctionsIndex:
+    return SanctionsIndex(
+        entries=tuple(entries),
+        source=source,
+        content_hash=content_hash,
+        published_at=published_at,
+    )
