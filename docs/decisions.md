@@ -36,6 +36,7 @@ Three sections carry most of the reasoning:
 | [5 — Screening and risk scoring](#phase-5--sanctions-screening-and-risk-scoring) | Fuzzy matching, the threshold argument, and why auto-rejecting on a name is wrong |
 | [6 — The review desk](#phase-6--the-compliance-review-desk) | What an officer is actually doing, and how two of them cannot decide one case |
 | [7 — Seed data, stats and retention](#phase-7--seed-data-stats-retention-and-states) | Making synthetic data that does not look synthetic; publishing numbers honestly |
+| [Correction — the lifecycle belongs in the schema](#correction-the-lifecycle-belongs-in-the-schema-migration-017) | Phase 4 broke the project's own stated principle; migration 017 fixes it |
 
 ## A note on the things that were wrong
 
@@ -50,6 +51,9 @@ deliberate, and they are the parts most worth reading:
   customer book, and the "obvious" fix for it that was also wrong.
 - **Phase 7** — two successive models of a review backlog, both wrong in
   different directions.
+- **Migration 017** — the lifecycle rule was put in Python in Phase 4, in
+  breach of the principle this project set out in Phase 0. The correction, and
+  why it took four phases to notice.
 
 A document that recorded only the decisions that worked would be a marketing
 page.
@@ -1609,3 +1613,165 @@ someone probe for which ids exist.
   median automatic, 13.9 hours median reviewed.
 - Retention: 40 `done` jobs older than seven days deleted, 5 recent ones kept,
   the single `parked` job untouched and warned about on every run.
+
+---
+
+## Correction: the lifecycle belongs in the schema (migration 017)
+
+### What was wrong
+
+Phase 0 set out this project's central structural principle:
+
+> `/db` belongs to neither service. Two languages share one database, so the
+> schema cannot be owned by either one's ORM — or by either one's code.
+
+Phase 4 then built the application lifecycle as a state machine in
+`worker/lifecycle.py` and **did not follow that principle**. The rules were
+correct, carefully explained and well tested. They were also in Python, in one
+of the two services, governing a table both services write to.
+
+The TypeScript side made two status transitions without ever consulting them:
+
+```
+web/src/app/verify/[id]/actions.ts:46   set status = 'submitted' ... where status = 'started'
+web/src/app/desk/[id]/actions.ts:110    set status = 'decided'   ... where status = 'screening'
+```
+
+Both were guarded by a `WHERE` clause, and both were correct. That is not the
+problem. The problem is what kind of thing was holding the line: **a convention,
+duplicated across two languages, with no mechanism to keep the copies honest.**
+The next transition added in TypeScript would not have had the guard, and
+nothing anywhere would have complained.
+
+I flagged this in Phase 4's own notes and shipped it anyway, which is worth
+recording plainly. It is easy to state a principle in Phase 0 and much harder to
+notice, four phases later, that the convenient thing you are about to do
+violates it. The rule was in Python because the worker needed it first, and
+"the worker needed it first" is not an architectural reason.
+
+### Why a schema rule rather than a shared library
+
+The obvious alternative is to extract the transition table into something both
+services import. That fails for the same reason an ORM would: there is no shared
+runtime. One service is Node, the other CPython. Sharing it means either
+duplicating it — which is what we already had — or inventing a service call
+between the two, which architecture rule 1 exists to forbid.
+
+The database is the only thing both services genuinely share. A rule expressed
+there is a rule neither can ignore, in any language, including `psql`.
+
+That is the same argument that put migrations in `/db` in the first place. This
+migration is not a new idea; it is the original idea, applied somewhere it
+should have been applied already.
+
+### What is a schema rule and what is not
+
+Not every rule belongs in the database, and it is worth being precise about why
+this one does.
+
+**The lifecycle is an invariant of the data.** "An application that has not been
+screened cannot be decided" is true of every row at every moment, regardless of
+which service is writing, what feature is being built, or whether anyone
+remembered. It also carries legal weight: it is *you may not decide on a
+customer you have not screened*.
+
+**Risk scoring is not.** It is a policy that changes, is versioned, needs
+explaining to an officer, and belongs in `scoring.py` as pure functions with a
+ruleset version stored alongside every result. Putting it in the database would
+make it harder to test, harder to read and harder to change — all the opposite
+of what it needs.
+
+The distinction: **invariants that must hold for all data go in the schema;
+policy that is expected to change goes in code.**
+
+### How it is enforced
+
+A `BEFORE UPDATE ... FOR EACH ROW` trigger on `applications`, deliberately built
+to the same pattern as the append-only triggers on `audit_events` from migration
+006 — a plpgsql function that raises with a real SQLSTATE
+(`restrict_violation`), attached by a trigger. Following the existing precedent
+rather than inventing a second style of guard.
+
+One difference from that precedent, which is deliberate. The `audit_events`
+triggers are `FOR EACH STATEMENT`, because the operation is banned outright:
+there is nothing to inspect, so a statement-level trigger is both cheaper and
+also fires on statements matching zero rows. Here the operation is permitted and
+it is the *values* that decide, which can only be examined a row at a time.
+
+The transitions live in a table, `application_transitions`, rather than being
+hardcoded inside the function. That is the one design choice beyond the obvious,
+and the reason is that a table can be **read**: `lifecycle.py` keeps a copy so
+the worker can decide without a round trip, and a test now compares that copy
+against these rows. Hardcoding the list in plpgsql would have made the Python
+mirror something we trust. A table makes it something we check.
+
+`lifecycle.py` now says so at the top of the declaration, in as many words:
+*this is a mirror, the database is authoritative*. If the two ever disagree the
+database wins by construction, because it refuses the write.
+
+### Two things found while building it
+
+**`BEFORE ROW` triggers run before `CHECK` constraints.** The first version of
+the test asserted that setting a status to `'aproved'` would raise a
+`CheckViolation` from migration 001's constraint. It does not: the lifecycle
+trigger sees the value first, finds no edge for `started -> aproved`, and
+raises `RestrictViolation`. The CHECK never gets a look on that path.
+
+Both are still needed, and the division is now explicit in the tests: the
+trigger governs which **moves** are legal and only fires on `UPDATE`; the CHECK
+governs which **values** may exist at all, and is what guards `INSERT`, where
+there is no previous row to transition from.
+
+**Most writes to `applications` are not transitions.** Writing a risk score,
+linking a vendor session, bumping `updated_at` — the lifecycle has nothing to
+say about any of them. The trigger short-circuits when `NEW.status IS NOT
+DISTINCT FROM OLD.status`, which also makes a self-transition a no-op rather
+than an error. That matters for idempotency: handlers re-issue the same write
+by design, and refusing it would turn a harmless duplicate into a failure.
+
+### What this deliberately does not do
+
+It does not constrain `INSERT`. An insert creates an application; it does not
+transition one, and there is no `OLD` row to reason from. In practice every
+caller inserts at `'started'`, and the CHECK limits the column to five values —
+so the remaining gap is that a direct `INSERT` could create a row already at
+`'decided'`. Closing it would mean deciding whether backfills and restores are
+allowed to bypass the lifecycle, which is a larger question than this migration
+should answer quietly.
+
+### Evidence
+
+**From `psql`, with no application code involved:**
+
+```
+update applications set status = 'decided' where id = '<a started case>';
+ERROR:  illegal application lifecycle transition: started -> decided
+HINT:   Permitted transitions are rows in application_transitions.
+        Nothing reaches 'decided' except from 'screening'.
+
+update applications set status = 'checking' where id = '<a decided case>';
+ERROR:  illegal application lifecycle transition: decided -> checking
+```
+
+**From TypeScript, through `pg`, with the `WHERE` guard deliberately removed** —
+every one of these would have succeeded before this migration:
+
+```
+started -> decided    ✓ refused by the database
+decided -> checking   ✓ refused by the database
+decided -> submitted  ✓ refused by the database
+started -> submitted  ✓ accepted   (the trigger is not simply blocking everything)
+```
+
+**Tests:** 146 passing, up from 121. The 25 new ones are the first
+database-backed tests in the project — necessarily so, because the thing under
+test *is* the database, and asserting it from Python alone would only be testing
+a copy of the rule. They skip cleanly when no database is reachable, so the pure
+suite still runs on a fresh clone. They cover every legal edge, ten
+representative illegal ones, the compliance rule as its own named test, and the
+mirror-versus-schema comparison.
+
+**Nothing broke:** the seeder still drives 150 applicants through the full
+lifecycle, and a live application still runs
+`started → submitted → screening → referred` through the real webhook, worker
+and scoring path.

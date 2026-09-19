@@ -73,7 +73,9 @@ produce one stored event and exactly one job. Verified: three identical
 webhooks → `200`, `200`, `200`, one row, one job.
 
 **Ordering is decided by rules, not by arrival time.** An explicit state
-machine governs which transitions are legal:
+machine governs which transitions are legal — and it lives in the **database**,
+as a table of permitted edges enforced by a `BEFORE UPDATE` trigger, so both
+services are bound by it whether they consult it or not:
 
 ```
 started → submitted → checking → screening → decided
@@ -86,9 +88,18 @@ exist.
 
 Note what is absent from that diagram: **nothing reaches `decided` except from
 `screening`.** That is not tidiness, it is a compliance rule — *you may not
-decide on a customer you have not screened* — enforced by the shape of the
-state machine rather than by everyone remembering. A test exists whose only
-job is to fail if someone adds a convenient shortcut.
+decide on a customer you have not screened* — and it is enforced by Postgres
+rather than by everyone remembering:
+
+```
+$ psql -c "update applications set status = 'decided' where id = '<a new case>'"
+ERROR:  illegal application lifecycle transition: started -> decided
+HINT:   Nothing reaches 'decided' except from 'screening'.
+```
+
+`worker/lifecycle.py` keeps a copy of the table so the worker can decide without
+a round trip, and a test asserts the copy matches the schema — so drift is a
+test failure rather than a surprise. The database is authoritative.
 
 **Two guards, because they answer different questions.** The state machine
 governs *legality*. The vendor's own timestamp governs *recency*. Neither
@@ -531,9 +542,10 @@ approach, not a system that should go near a real customer. Specifically:
 - **No four-eyes principle.** One officer can approve any case alone. Real
   firms require a second reviewer above a threshold.
 - **No role separation.** Every signed-in user can decide anything.
-- **No CI**, no automated deploy checks, and **no integration tests** — the
-  async behaviour is verified by demonstration rather than continuously
-  asserted. See "things I would fix first" below.
+- **No CI**, and **almost no integration tests** — the lifecycle trigger has
+  25 database-backed tests, but the async behaviour (idempotency, no
+  double-processing, the sweeper) is still verified by demonstration rather
+  than continuously asserted.
 - **No pagination.** The queue shows 200 cases and silently hides the rest.
 - **No backups, no disaster recovery, no runbook, no alerting.** Nothing tells
   anyone that the parked-jobs count is climbing.

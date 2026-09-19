@@ -45,6 +45,8 @@ Migrations arrive in Phase 1.
 | `013_mock_vendor_result_at.sql` | Simulator scaffolding: a controllable vendor-side result timestamp. |
 | `014_risk_scoring.sql` | `risk_signals`, `risk_scored_at`, `risk_ruleset_version`, and a unique index making screening re-runnable. |
 | `015_review_queue.sql` | Indexes for the review desk's pending queue. |
+| `016_job_retention.sql` | A second recurring job type, and an index for retention. |
+| `017_lifecycle_enforcement.sql` | The application lifecycle, moved out of Python and into the schema. |
 
 ## The runner
 

@@ -55,7 +55,33 @@ MEANING: dict[Status, str] = {
     "decided": "a decision has been recorded",
 }
 
-#: The permitted transitions. Anything not listed here is refused.
+#: The permitted transitions.
+#:
+#: ============================================================================
+#: THIS IS A MIRROR. THE DATABASE IS AUTHORITATIVE.
+#: ============================================================================
+#:
+#: The real rule lives in the `application_transitions` table and is enforced by
+#: the BEFORE UPDATE trigger on `applications` (migration 017). This copy exists
+#: only so the worker can decide what to do WITHOUT a round trip — to answer
+#: "should I write this?" before attempting the write.
+#:
+#: It is not the source of truth and must never be treated as one. If the two
+#: ever disagree, the database wins by construction: it refuses the UPDATE. The
+#: only consequence of this copy drifting is that the worker would attempt a
+#: write the database then rejects — noisy, but not incorrect.
+#:
+#: test_lifecycle_trigger.py asserts the two are identical, so drift is a test
+#: failure rather than a surprise in production.
+#:
+#: WHY THE DATABASE AND NOT HERE
+#:
+#: Two services share this database and nothing else. A rule held in Python is
+#: a rule the TypeScript side can ignore — and for two releases it did, guarded
+#: only by a WHERE clause in each query, which is a convention duplicated across
+#: two languages. /db exists precisely so the schema is owned by neither
+#: service; Phase 4 put the lifecycle here and did not follow that principle.
+#: Migration 017 corrects it.
 #:
 #: Forward skips are allowed because a fast vendor genuinely can jump a stage —
 #: an applicant who completes instantly goes from 'submitted' straight to a
@@ -63,8 +89,7 @@ MEANING: dict[Status, str] = {
 #:
 #: Note what is absent: NOTHING reaches 'decided' except 'screening'. That is
 #: not tidiness, it is a compliance rule — you may not decide on a customer you
-#: have not screened — enforced by the shape of the state machine rather than by
-#: everyone remembering. 'decided' is terminal.
+#: have not screened. 'decided' is terminal.
 ALLOWED_TRANSITIONS: dict[Status, frozenset[Status]] = {
     "started": frozenset({"submitted", "checking", "screening"}),
     "submitted": frozenset({"checking", "screening"}),
@@ -124,6 +149,13 @@ class Evaluation:
 
 
 def is_legal(current: Status, target: Status) -> bool:
+    """Would the database accept this transition?
+
+    An advisory answer, read from the local mirror so no round trip is needed.
+    The authoritative answer is whatever the trigger on `applications` does when
+    the UPDATE is attempted — this only lets the worker avoid attempting writes
+    it already knows will be refused.
+    """
     return target in ALLOWED_TRANSITIONS.get(current, frozenset())
 
 
