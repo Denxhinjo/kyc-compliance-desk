@@ -1,0 +1,212 @@
+/* ===========================================================================
+   Design tokens — KYC Review Desk
+   ===========================================================================
+
+   Custom properties ONLY. No selectors beyond :root, no component classes, no
+   resets. That is deliberate: this file is used by two codebases — this Next.js
+   app and a separate static case-study site — and it has to drop into both
+   unchanged. Anything opinionated about markup would make one of them fight it.
+
+   REGISTER
+
+   Closer to API documentation or an internal admin tool than to a product
+   page. Dense, precise, unfussy. No gradients, no decorative shadows, no
+   colour that is not carrying information.
+
+   THE RULES THIS FILE ENFORCES
+
+     One spacing scale        6 steps, 4px base
+     Four type sizes          and no others
+     One border radius        4px
+     One border colour        --border
+     One accent               --accent, for focus and links only
+     Semantic colour          risk bands and decision states, nothing else
+
+   The point of a small scale is not minimalism. Inconsistent padding and a
+   dozen near-identical font sizes are what actually make an interface read as
+   unfinished, and neither is visible as a mistake until you list them out.
+   =========================================================================== */
+
+:root {
+  /* --- Type ----------------------------------------------------------------
+
+     No webfont, by choice. Three reasons, in order of weight:
+
+       1. This is an operations tool. It must paint immediately on a cold cache
+          and never reflow text under someone who is reading a case.
+       2. `tokens.css` has to work unchanged on a static site with no build
+          step and no font-loading strategy. A @font-face here would make the
+          file depend on files next to it.
+       3. The identity in this system comes from density, scale, alignment and
+          restraint — not from a distinctive typeface. A borrowed personality
+          would be the most decorative thing on the page.
+
+     The stacks are written out rather than left to `system-ui` alone, because
+     `system-ui` resolves to different metrics across platforms and the point
+     here is predictability. ------------------------------------------------ */
+
+  --font-ui:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  /* Every identifier, hash, timestamp, score and count. Monospace is not a
+     stylistic choice for those — it is what makes a column of them scannable,
+     and what makes two hashes comparable at a glance. */
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Segoe UI Mono",
+    Consolas, "Liberation Mono", monospace;
+
+  /* FOUR SIZES. There were fifteen before this file existed, most of them
+     half-pixel apart and none of them deliberate.
+
+       xs   uppercase micro-labels, column headers, metadata
+       sm   the workhorse: body text, tables, forms, everything unmarked
+       lg   page and section headings
+       xl   figures only — stat values and the case risk score
+
+     Density is held by line-height and padding, not by shrinking type. A
+     12.5px label is not denser than a 13px one, it is just less legible. */
+  --text-xs: 0.6875rem;  /* 11px */
+  --text-sm: 0.8125rem;  /* 13px */
+  --text-lg: 1.0625rem;  /* 17px */
+  --text-xl: 1.75rem;    /* 28px */
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-bold: 650;
+
+  /* Applied to every micro-label so they read as labels rather than as small
+     text that got lost. */
+  --tracking-label: 0.06em;
+
+  /* --- Spacing -------------------------------------------------------------
+     One scale, 4px base, six steps. Anything that needs a gap uses one of
+     these. Most "unprofessional" is inconsistent padding, and inconsistent
+     padding is what happens when there is no scale to reach for. -------------- */
+
+  --space-1: 0.25rem;  /*  4px  inside a chip, between a label and its value */
+  --space-2: 0.5rem;   /*  8px  table cell padding, tight stacks */
+  --space-3: 0.75rem;  /* 12px  panel padding, gaps between related things */
+  --space-4: 1rem;     /* 16px  page gutters, gaps between panels */
+  --space-5: 1.5rem;   /* 24px  between sections */
+  --space-6: 2rem;     /* 32px  between major blocks */
+
+  /* --- Neutral ramp --------------------------------------------------------
+
+     Dark, and only dark. A light theme is deferred rather than half-built:
+     two themes done at fifty percent look worse than one done properly, and
+     the semantic colours below would each need a second set of values chosen
+     against a light ground to keep the same contrast relationships.
+
+     Very slightly cool. A pure grey reads as unfinished on a screen; a blue
+     cast at this saturation reads as deliberate without being a colour. ------ */
+
+  --n-950: #0d0f13;  /* page ground */
+  --n-900: #14171d;  /* panels, raised surfaces */
+  --n-850: #1a1e26;  /* row hover, inset wells, input fields */
+  --n-800: #232833;  /* keycaps, chip grounds that carry no meaning */
+  --n-700: #2b313d;  /* THE border colour — see --border */
+  --n-400: #8b94a3;  /* dim: present but not being read */
+  --n-300: #a8b0bd;  /* muted: secondary text, labels */
+  --n-100: #e3e6eb;  /* primary text */
+
+  --bg: var(--n-950);
+  --surface: var(--n-900);
+  --surface-raised: var(--n-850);
+  --text: var(--n-100);
+  --text-muted: var(--n-300);
+  --text-dim: var(--n-400);
+
+  /* ONE border colour, everywhere: panel edges, table rules, input outlines.
+     Two weights of rule on one screen is a thing the eye notices and cannot
+     name, which is the worst kind of inconsistency. */
+  --border: var(--n-700);
+
+  /* --- Accent --------------------------------------------------------------
+     Exactly one, and it does exactly two jobs: focus rings and links. It is
+     deliberately NOT used on primary buttons — approve and reject carry
+     semantic colour, and an accent-coloured third thing would compete with
+     them for the same attention. ------------------------------------------- */
+
+  --accent: #5b9dd9;
+  --accent-muted: #2d4f73;
+  --accent-bg: #16253a;
+
+  /* --- Semantic: risk bands ------------------------------------------------
+
+     These map to the scoring ruleset's OWN thresholds, not to an invented
+     scale: under 20 auto-approves, 20–79 goes to a human, 80 and over
+     auto-rejects. So amber means precisely "a person has to look at this",
+     which is the only thing a queue full of referred cases needs to say.
+
+     Getting this wrong is worse than having no colour: a green 45 on a case
+     that is sitting in the review queue tells the officer the opposite of the
+     truth. ------------------------------------------------------------------ */
+
+  --risk-low-bg: #152b1f;
+  --risk-low-text: #74c79b;
+  --risk-med-bg: #33290f;
+  --risk-med-text: #e0bc6a;
+  --risk-high-bg: #3a1c1c;
+  --risk-high-text: #ef8f88;
+
+  /* --- Semantic: decision and status states -------------------------------- */
+
+  --ok-bg: #152b1f;
+  --ok-text: #74c79b;
+  --ok-border: #2a5c40;
+
+  --bad-bg: #3a1c1c;
+  --bad-text: #ef8f88;
+  --bad-border: #6b3333;
+
+  /* Referred / awaiting / unknown. Deliberately colourless: "a human has not
+     looked at this yet" is not good news or bad news, and painting it either
+     way is a judgement the system has not made. */
+  --neutral-bg: var(--n-800);
+  --neutral-text: var(--n-300);
+
+  /* Warning, used for the demo banner and for degraded states. */
+  --warn-bg: #33290f;
+  --warn-text: #e8cf8e;
+  --warn-border: #6b5416;
+
+  /* --- Geometry ------------------------------------------------------------ */
+
+  /* ONE radius. 4px: enough to not look like an accident, small enough to read
+     as technical rather than friendly. Chips use it too — a fully rounded pill
+     belongs to a consumer product, not to a case management screen. */
+  --radius: 4px;
+
+  --border-width: 1px;
+
+  /* Two container widths, and only two. The desk is wide because comparison
+     needs columns side by side; reading pages are narrow because a 1200px line
+     of prose is unreadable. Before these existed the app had 420, 820 and 1180
+     with nothing to say why. */
+  --width-prose: 52rem;   /* 832px — headings and explanatory copy */
+  --width-wide: 75rem;    /* 1200px — the desk and the case view */
+  /* 480px — anything containing inputs. A text field stretched to the full
+     prose measure is one of the clearest signs nobody looked at a screen: a
+     900px-wide box for a city name tells the person filling it in that they
+     have got the field wrong before they have typed anything. */
+  --width-form: 30rem;
+
+  /* --- Motion --------------------------------------------------------------
+     State transitions only — hover, focus, selection. Nothing enters, nothing
+     eases into place, nothing animates on load. 120ms is below the threshold
+     at which a change reads as a transition rather than as a redraw. -------- */
+
+  --transition: 120ms ease-out;
+}
+
+/* Motion is the first thing that should stop when someone has asked for less
+   of it. Declared here so both codebases inherit it from the same file. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition: 0ms;
+  }
+}

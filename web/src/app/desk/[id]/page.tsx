@@ -391,9 +391,23 @@ export default async function CasePage({
   );
 }
 
+/**
+ * Colour band for a risk score.
+ *
+ * These are the RULESET'S OWN thresholds, not an invented scale: under 20
+ * auto-approves, 20-79 goes to a human, 80 and over auto-rejects. The case
+ * view prints those same two numbers under the flags, so the colour and the
+ * stated rule agree.
+ *
+ * The mid boundary used to be 50, which meant every case in the review queue
+ * — all of which score 20-79 by definition — rendered green. A green 45 on a
+ * case that is sitting in the queue waiting for a human tells the officer the
+ * opposite of the truth, so this is a correctness fix rather than a palette
+ * preference.
+ */
 function scoreClass(score: number): string {
   if (score >= 80) return "score-high";
-  if (score >= 50) return "score-mid";
+  if (score >= 20) return "score-mid";
   return "score-low";
 }
 

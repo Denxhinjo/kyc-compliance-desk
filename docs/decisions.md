@@ -2161,3 +2161,81 @@ was this screened against?" gets an answer from the database.
 
 The default is no fallback at all, because in development a missing list is a
 mistake you want to see immediately, not a mode you want to run in.
+
+---
+
+## Visual discipline: one token file, used twice
+
+The demo read as unfinished, and that undercut everything else in it. Nothing
+about the information architecture was wrong — the desk works — so this was a
+pass for consistency, not a redesign.
+
+### What was actually wrong
+
+Listing it out is the whole diagnosis:
+
+| | Before | After |
+| --- | --- | --- |
+| Font sizes | 15 (9, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 15, 17, 19, 22, 24, 26px) | 4 |
+| Border radii | 7 (3, 4, 6, 7, 8, 10, 100px) | 1 |
+| Border colours | 2 weights, used interchangeably | 1 |
+| Container widths | 3, with nothing to say why | 3, each with a stated job |
+| Tabular figures | none | every number in the system |
+
+None of those is visible as a mistake on its own. A 12.5px label next to a 13px
+one does not look wrong; it just makes the page feel slightly out of focus, and
+fifteen of them compound into "somebody stopped caring".
+
+### `tokens.css`, and why it is only custom properties
+
+The file has to drop unchanged into a separate static case-study site, so that
+clicking from the write-up into the live demo has no seam. That constraint is
+what makes it custom properties and nothing else — no resets, no component
+classes, no selectors beyond `:root`. Anything opinionated about markup would
+have been something one of the two codebases had to fight.
+
+It is also why there is no webfont. An operations tool should paint on a cold
+cache and never reflow text under someone reading a case; a static site with no
+build step should not need a font-loading strategy; and the identity here comes
+from density, alignment and restraint rather than from a typeface. A borrowed
+personality would have been the most decorative thing on the page.
+
+### The one change that was not cosmetic
+
+The score colour bands were 50 and 80. The scoring ruleset's bands are 20 and
+80 — under 20 auto-approves, 20–79 goes to a human, 80+ auto-rejects.
+
+Every case in the review queue scores 20–79 by definition. So every case in the
+queue rendered **green**, and a green 45 on a case waiting fifteen days for a
+human tells the officer the opposite of the truth. The bands now come from the
+ruleset, which the case view already prints two lines below the score, so the
+colour and the stated rule finally agree.
+
+That is a correctness fix wearing a palette's clothes, and it is the argument
+for treating colour as data: a decorative green is harmless, a semantic green
+that means "fine" on something that is not fine is not.
+
+### Uniform row height, and what it cost
+
+Queue rows grew to fit their flag text, so a ten-row queue had six different
+row heights. You cannot run your eye down a column that keeps changing pitch,
+and scanning is the entire job of that screen.
+
+The flag is now clamped to one line. Nothing is lost — the full sentence is in
+the cell's `title` and printed in full under "Why this was flagged" on the case
+view, which is where it is read rather than scanned — but it is a real trade
+and worth naming rather than presenting the uniform rows as free.
+
+### Chips, not pills
+
+Status is a chip with an edge, on the same 4px radius as everything else. A
+fully rounded pill belongs to a consumer product; this is a case file. The edge
+also makes a status readable next to the score and waiting-time colours, which
+coloured text could not manage.
+
+### Deferred, deliberately
+
+A light theme. Two themes at fifty percent look worse than one done properly,
+and every semantic colour would need a second set of values chosen against a
+light ground to hold the same contrast relationships. The tokens are structured
+so it is a second block of values rather than a rewrite.
