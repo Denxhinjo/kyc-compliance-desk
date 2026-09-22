@@ -124,7 +124,11 @@ jobs:
       STAFF_EMAIL: officer@example.com
       STAFF_PASSWORD: ci-only
       DIDIT_MODE: simulator
-      NODE_ENV: production
+      # NODE_ENV is deliberately NOT set at job level. `npm ci` honours it and
+      # skips devDependencies, which drops typescript — and next.config.ts is
+      # TypeScript, so the build then fails transpiling its own config. It is
+      # set on the start step instead, which is the only place it means
+      # anything.
 
     steps:
       - uses: actions/checkout@v4
@@ -163,6 +167,8 @@ jobs:
 
       - name: Start the web app
         working-directory: web
+        env:
+          NODE_ENV: production
         run: |
           npm start &
           for i in $(seq 1 60); do
