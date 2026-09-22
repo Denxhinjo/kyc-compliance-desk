@@ -1,0 +1,16 @@
+{
+  "/_not-found/page": "/_not-found",
+  "/api/mock-vendor/v3/session/[id]/decision/route": "/api/mock-vendor/v3/session/[id]/decision",
+  "/api/mock-vendor/v3/session/route": "/api/mock-vendor/v3/session",
+  "/api/webhooks/didit/route": "/api/webhooks/didit",
+  "/health/page": "/health",
+  "/mock-vendor/verify/[token]/page": "/mock-vendor/verify/[token]",
+  "/apply/page": "/apply",
+  "/verify/[id]/page": "/verify/[id]",
+  "/page": "/",
+  "/stats/page": "/stats",
+  "/login/page": "/login",
+  "/status/[id]/page": "/status/[id]",
+  "/desk/page": "/desk",
+  "/desk/[id]/page": "/desk/[id]"
+}

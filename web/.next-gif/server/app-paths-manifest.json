@@ -1,0 +1,16 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/mock-vendor/v3/session/[id]/decision/route": "app/api/mock-vendor/v3/session/[id]/decision/route.js",
+  "/api/mock-vendor/v3/session/route": "app/api/mock-vendor/v3/session/route.js",
+  "/api/webhooks/didit/route": "app/api/webhooks/didit/route.js",
+  "/health/page": "app/health/page.js",
+  "/mock-vendor/verify/[token]/page": "app/mock-vendor/verify/[token]/page.js",
+  "/apply/page": "app/apply/page.js",
+  "/verify/[id]/page": "app/verify/[id]/page.js",
+  "/page": "app/page.js",
+  "/stats/page": "app/stats/page.js",
+  "/login/page": "app/login/page.js",
+  "/status/[id]/page": "app/status/[id]/page.js",
+  "/desk/page": "app/desk/page.js",
+  "/desk/[id]/page": "app/desk/[id]/page.js"
+}

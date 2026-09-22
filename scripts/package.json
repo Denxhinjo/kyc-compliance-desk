@@ -1,0 +1,9 @@
+{
+  "name": "kyc-demo-scripts",
+  "private": true,
+  "description": "Recording and demo tooling. Deliberately separate from /web and /worker: this is not part of either service, and neither should gain a dependency so that a GIF can be made.",
+  "type": "module",
+  "devDependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}
