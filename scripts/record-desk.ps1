@@ -88,6 +88,13 @@ if (-not (Test-Path (Join-Path $PSScriptRoot "node_modules"))) {
 # --- build and start the isolated server -----------------------------------
 Step "building the web app into $distDir"
 Push-Location (Join-Path $root "web")
+# `next build` rewrites tsconfig.json to add "<distDir>/types/**/*.ts" to its
+# include list. Harmless in itself, but tsconfig.json is a tracked file and a
+# recording script has no business leaving a diff behind — the first run of
+# this committed a stray ".next-gif/types/**/*.ts" line. Snapshot it here,
+# restore it in the finally block below.
+$tsconfig = Join-Path $root "web/tsconfig.json"
+$tsconfigBefore = Get-Content $tsconfig -Raw
 $env:NEXT_DIST_DIR = $distDir
 $env:DATABASE_URL = $baseUrl
 npm run build 2>&1 | Out-Null
@@ -124,6 +131,8 @@ try {
 finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
     Remove-Item Env:\NEXT_DIST_DIR, Env:\DATABASE_URL, Env:\NODE_ENV -ErrorAction SilentlyContinue
+    if ($tsconfigBefore) { Set-Content -Path $tsconfig -Value $tsconfigBefore -NoNewline }
+    Remove-Item (Join-Path $root "web/$distDir") -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # --- video -> GIF ----------------------------------------------------------
