@@ -175,6 +175,17 @@ a:hover {
   margin-top: var(--space-3);
 }
 
+/* The one paragraph on the home page that has to be read. Given a rule and a
+   little room rather than a larger size — the type scale has four sizes and
+   this is not worth a fifth. */
+.lede {
+  border-left: 2px solid var(--accent-muted);
+  color: var(--text);
+  margin: 0 0 var(--space-5);
+  max-width: 62ch;
+  padding-left: var(--space-3);
+}
+
 .sr-only {
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
@@ -1033,6 +1044,14 @@ pre {
 /* The raw event payload. Monospace, dimmed, and indented under its event —
    it is there to be checked, not read, and at full contrast it drowns the
    timeline it belongs to. */
+/* The applicant-facing line under a timeline entry. Plain language, never the
+   raw payload — see status/[id]/timeline-copy.ts for why that distinction is
+   load-bearing rather than cosmetic. */
+.t-detail {
+  color: var(--text-muted);
+  width: 100%;
+}
+
 .t-details {
   color: var(--text-dim);
   font-family: var(--font-mono);

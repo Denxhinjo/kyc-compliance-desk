@@ -15,6 +15,12 @@ const nextConfig: NextConfig = {
   // production build without disturbing a running dev server. Deployment leaves
   // this unset and uses .next as normal.
   distDir: process.env.NEXT_DIST_DIR || ".next",
+
+  // The floating dev-tools bubble. It never ships — Next.js only renders it
+  // under `next dev` — but it sits on top of the interface in every local
+  // screenshot, and screenshots of this demo are the thing most people will
+  // actually see. Off.
+  devIndicators: false,
 };
 
 export default nextConfig;

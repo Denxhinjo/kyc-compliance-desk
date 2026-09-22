@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { pool } from "@/lib/db";
+import {
+  describeForApplicant,
+  type ApplicantEvent,
+} from "./timeline-copy";
 import { AutoRefresh } from "./auto-refresh";
 
 export const dynamic = "force-dynamic";
@@ -92,6 +96,19 @@ export default async function StatusPage({
   };
   const stageIndex = LIFECYCLE.indexOf(application.status);
 
+  // Plain language, and a WHITELIST — see timeline-copy.ts. The same audit log
+  // that the officer reads as raw JSON carries the risk score and the screening
+  // reasons, and an applicant must not be shown either of those.
+  const visible = auditResult.rows
+    .map((event) => ({
+      event,
+      copy: describeForApplicant(event.action, event.details),
+    }))
+    .filter(
+      (row): row is { event: AuditRow; copy: ApplicantEvent } =>
+        row.copy !== null,
+    );
+
   return (
     <main>
       <AutoRefresh />
@@ -131,22 +148,19 @@ export default async function StatusPage({
 
       <h2>History</h2>
       <p className="sub">
-        Every change to this application, in the order it happened. This is read
-        straight from the append-only audit log.
+        Every step of your application, in the order it happened, read straight
+        from our append-only record.
       </p>
 
-      {auditResult.rows.length === 0 ? (
+      {visible.length === 0 ? (
         <p className="empty">Nothing has happened yet.</p>
       ) : (
         <ol className="timeline">
-          {auditResult.rows.map((event) => (
+          {visible.map(({ event, copy }) => (
             <li key={event.id}>
-              <span className="t-time">{event.occurred_at.slice(11, 19)}</span>
-              <span className="t-action">{event.action}</span>
-              <span className="t-actor">{event.actor}</span>
-              {Object.keys(event.details).length > 0 && (
-                <code className="t-details">{JSON.stringify(event.details)}</code>
-              )}
+              <span className="t-time">{event.occurred_at.slice(0, 16)}</span>
+              <span className="t-action">{copy.title}</span>
+              {copy.detail && <span className="t-detail">{copy.detail}</span>}
             </li>
           ))}
         </ol>
