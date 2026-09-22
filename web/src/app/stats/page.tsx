@@ -247,7 +247,7 @@ export default async function StatsPage() {
           }
           note={
             enoughData && lat.p90_seconds !== null
-              ? `one in ten of the last ${lat.sample} took at least this long`
+              ? `one in ten of the last ${lat.sample} took at least this long — read it against the human median with the note below`
               : "shown once there are enough decisions"
           }
           muted={!enoughData}
@@ -269,6 +269,38 @@ export default async function StatsPage() {
           note="created but not yet through verification — not counted as processed"
         />
       </div>
+
+      {/* This belongs ON the page, not in a commit message. The relationship
+          between these two figures is counter-intuitive in BOTH directions, so
+          it renders whenever there is enough data rather than only when the
+          numbers happen to look wrong — a reader who arrives on a day the p90
+          sits just above the human median is no less puzzled than one who
+          arrives on a day it sits below. */}
+      {enoughData &&
+        lat.p90_seconds !== null &&
+        lat.human_median_seconds !== null && (
+          <p className="method-note">
+            <strong>
+              Why the 90th percentile and the human median sit so close
+              together.
+            </strong>{" "}
+            They measure different populations and are easy to misread against
+            each other. {autoPercent}% of these decisions are automatic and
+            finish in minutes, so the 90th percentile of <em>everything</em>{" "}
+            lands only a little way into the reviewed cases rather than at
+            their middle — which means it can fall <em>below</em> the human
+            median entirely when the reviewed share is small. The two groups
+            also overlap rather than sitting one after the other, because every
+            figure here is measured from when the applicant applied, so the
+            vendor&apos;s own latency is inside all of them: an automatic
+            decision on an application the vendor sat on for hours is slower
+            than a reviewed one the vendor answered in a minute. So the p90
+            answers &ldquo;how long does a slow case take?&rdquo; across the
+            whole population, while the human median answers &ldquo;how long
+            does a reviewed case take?&rdquo;, and which of the two is larger
+            moves with the mix rather than with how fast anyone is working.
+          </p>
+        )}
 
       <h2>Decisions over time</h2>
       <p className="sub small">

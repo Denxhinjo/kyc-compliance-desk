@@ -11,10 +11,31 @@
  * The applicant's status page is a different audience with a different rule.
  * The same log contains the risk score, the routing decision and the screening
  * reasons — including sentences of the form "Sanctions match against X on OFAC
- * SDN at 86% name similarity". Showing an applicant that they matched a
- * sanctions list is not merely untidy. In the UK it is TIPPING OFF (Proceeds
- * of Crime Act 2002, s.333A), a criminal offence, and most jurisdictions have
- * an equivalent. A firm that leaks it has a bigger problem than a scruffy page.
+ * SDN at 86% name similarity". Three reasons an applicant is not shown that,
+ * none of which needs a statute to stand up:
+ *
+ *   1. TIPPING OFF. Financial-crime regimes generally restrict telling a
+ *      customer what screening or reporting has happened about them. Where
+ *      exactly the line falls varies by jurisdiction and by whether a report
+ *      has been made or an investigation is under way, so the safe operating
+ *      rule is simply that screening detail does not go to its subject — and
+ *      then the legal question never has to be reached.
+ *
+ *   2. IT TEACHES EVASION. "Matched at 86%, downgraded because the listed date
+ *      of birth conflicts" tells someone precisely which field to change to
+ *      get a different answer next time.
+ *
+ *   3. MOST OF THESE MATCHES ARE WRONG. A name similarity is a finding about a
+ *      NAME, not about this person. Showing it attaches a sanctioned
+ *      individual's identity to an applicant who is, in the ordinary case,
+ *      somebody else entirely — which is the whole reason a human reviews it.
+ *
+ * On the law specifically: in the UK the nearest provision is the Proceeds of
+ * Crime Act 2002, s.333A, but it is NARROWER than the rule applied here — it
+ * concerns disclosing that a suspicious activity report has been made or that
+ * a money-laundering investigation is contemplated or under way, which is not
+ * automatically what a sanctions match disclosed to an applicant amounts to.
+ * It is named as the family of rule this sits in, not as authority for it.
  *
  * So this maps each event to a sentence written for the applicant, and
  * FAILS CLOSED: an action with no entry here renders nothing at all. A new

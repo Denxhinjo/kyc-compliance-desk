@@ -2239,3 +2239,109 @@ A light theme. Two themes at fifty percent look worse than one done properly,
 and every semantic colour would need a second set of values chosen against a
 light ground to hold the same contrast relationships. The tokens are structured
 so it is a second block of values rather than a rewrite.
+
+---
+
+## Part 3: verifying a number, and two corrections
+
+### The 90th percentile was correct
+
+The stats page reported a human median of 14.1h, an automatic median of 10m,
+and a 90th percentile overall of 3.4h. A p90 below the human median looks
+wrong, and the reasoning that it must be wrong is good: with 63 human cases in
+500, the 450th value does sit inside the human population.
+
+It is still correct, and two things make it so.
+
+**The share, not just the position.** With 87.4% of decisions automatic, the
+0.90 quantile lands only 2.6 percentage points into the human population —
+around its 21st percentile, nowhere near its middle. The p90 asks "how long
+does a slow case take?" across everything; the human median asks "how long
+does a reviewed case take?". When most cases are not reviewed, the first sits
+below the second.
+
+**The populations overlap.** They are not autos-then-humans. In the current
+sample the first human decision appears at sorted rank 237 of 500 and the last
+automatic at rank 431 — 194 ranks of overlap. The slowest automatic decision
+took 5.37h and the quickest human one 11 minutes, because every figure is
+measured from when the applicant applied, so the vendor's own latency is
+inside all of them. An automatic decision on an application the vendor sat on
+for five hours is slower than a reviewed one the vendor answered in a minute.
+
+Demonstrated rather than argued. Resampling the real data to a 12.6% human
+share, 400 random trials: p90 fell below the human median in **400 of 400**,
+median p90 2.77h against a human median of 15.68h — close to the reported
+3.4h and 14.1h. At the current 21% human share the same test gives **0 of
+400**. The comparison flips on the mix, which is exactly what it should do.
+
+The explanation now renders on the page, next to the figure, and only when the
+condition actually holds.
+
+### Every other figure was checked the same way
+
+Each one recomputed a second way — `percentile_cont` reimplemented in Python
+from its definition, counts derived from a different direction — so a mistake
+in one could not reproduce itself in the other. All four percentiles agree to
+1e-6. `auto + human == decided`, `approved + rejected == decided`, and no
+application carries two terminal decisions.
+
+The accounting identity holds exactly: **in flight 94 + awaiting review 20 +
+processed 746 = 860 applications**. Every application is in exactly one tile,
+which is worth knowing because a stats page whose categories silently overlap
+or leave a gap is the usual way these numbers go wrong.
+
+### Correction: the legal claim was overstated
+
+The comment written in Part 2 said that showing an applicant their sanctions
+match "is TIPPING OFF (Proceeds of Crime Act 2002, s.333A), a criminal
+offence". That is more confident than the facts support. Section 333A is
+narrower: it concerns disclosing that a suspicious activity report has been
+made, or that a money-laundering investigation is contemplated or under way.
+A sanctions match disclosed to an applicant is not automatically either.
+
+Rewritten to make three claims that stand without a citation — tipping-off
+rules as a general category, that the disclosure teaches evasion, and that the
+match is usually a false positive about somebody else whose identity would be
+attached to this applicant. The statute is named as the family of rule this
+sits in, not as authority for it.
+
+Recording the correction rather than quietly editing it, because the habit
+being practised is the point: understate the law and be right, rather than
+cite a section and be taken apart by someone who knows it better.
+
+### Correction: the disclosure check is now a test
+
+Part 2 verified the fix by grepping one response by hand — exactly the thing a
+previous round was spent converting into continuous assertions.
+`worker/tests/test_applicant_disclosure.py` now fetches the public status page
+of a seeded application carrying a real sanctions match and asserts that
+"OFAC", "SDN", "name similarity", "confirmed" and the raw payload keys appear
+nowhere in the response, markup and RSC stream together.
+
+It has a counterweight test, because a disclosure assertion is satisfied by a
+blank page and that is the classic way one stops asserting anything. And it
+was checked by sabotage: re-adding the raw `JSON.stringify(event.details)`
+turns it red, removing it turns it green.
+
+One deliberate awkwardness. This is the only fixture in the suite that reads
+the development database rather than the throwaway one, because the assertion
+is about what a running web server serves and that server is connected to
+`DATABASE_URL`. A row written to the `_test` database would be invisible to
+it, and the test would pass against a page rendering nothing — the exact false
+green the file exists to prevent. It reads rather than writes, so nothing is
+added to the demo data.
+
+### Found on the way: a 404 served as 200
+
+The unknown-application test turned up something unrelated. `/status/<bad-id>`
+renders the not-found page but answers HTTP 200.
+
+The cause is `loading.tsx` in that segment: Next.js begins streaming the
+loading shell immediately, the response headers flush, and by the time
+`notFound()` throws the status can no longer be set. Measured both ways —
+moving the file aside makes the same request answer 404, putting it back makes
+it 200 again.
+
+That is a real trade between a correct status code and a loading state that
+keeps the page from jumping, not a typo to fix in passing. Left as it is,
+recorded in the test, and flagged for a decision.

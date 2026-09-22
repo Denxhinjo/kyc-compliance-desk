@@ -175,6 +175,19 @@ a:hover {
   margin-top: var(--space-3);
 }
 
+/* A figure that needs its explanation standing next to it. Same treatment as
+   the home page lede — a rule and a reading measure, not a bigger size. */
+.method-note {
+  border-left: 2px solid var(--accent-muted);
+  color: var(--text-muted);
+  margin: var(--space-4) 0 0;
+  max-width: 72ch;
+  padding-left: var(--space-3);
+}
+.method-note strong {
+  color: var(--text);
+}
+
 /* The one paragraph on the home page that has to be read. Given a rule and a
    little room rather than a larger size — the type scale has four sizes and
    this is not worth a fifth. */
