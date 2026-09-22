@@ -487,30 +487,45 @@ impossible, and a one-word reason is itself a finding.
 
 ## Numbers
 
-From one seeded run of 500 synthetic applicants over six weeks, screened
-against the real OFAC SDN list. Every figure on `/stats` is computed from the
-database on each request; none is hardcoded, and each states what it was
-measured over.
+A **dated snapshot**, not a standing claim. Every figure on `/stats` is
+computed from the database on each request; none is hardcoded. These are what
+it read on one particular day, from a reproducible seed:
+
+```bash
+python db/migrate.py up
+cd worker
+python seed.py --count 600 --weeks 6 --seed 20260921
+python seed.py --count 260 --weeks 2 --seed 8891 --force
+```
 
 | Figure | Value | Measured over |
 | --- | --- | --- |
-| Decisions made without a human | **87.6%** | 369 of 421 decided applications |
-| Median time to decision, automatic | **9 minutes** | 369 automatic decisions |
-| Median time to decision, reviewed by a human | **13.9 hours** | 52 reviewed cases |
-| Reached a decision | **421** | of 500 applications created |
+| Decisions made without a human | **80.2%** | 599 of 747 decided applications |
+| Median time to decision, automatic | **9 minutes** | 394 automatic decisions in the last 500 |
+| Median time to decision, reviewed by a human | **15.8 hours** | 106 reviewed cases in the last 500 |
+| 90th percentile, overall | **15.9 hours** | the last 500 decisions |
+| Reached a decision | **747** | of 860 applications created |
+
+*Read on 2026-09-22, against the real OFAC SDN list (19,393 entries).*
+
+**Quote `/stats`, not this table.** The auto-decided share is a property of the
+applicant mix, so it moves whenever the data is reseeded — it has read 87.6% and
+80.2% on different days of writing this. A number copied into prose is a number
+that goes quietly wrong, which is why the page states its own denominators and
+why the figures above carry a date.
 
 Three notes, because a number without them is not publishable:
 
 **The median is split by who decided, because a combined figure is
-misleading.** With ~88% decided automatically in seconds, the machine's nine
-minutes drowns the number anyone actually wants. The combined median describes
-the machine, not the process.
+misleading.** With the large majority decided automatically in seconds, the
+machine's nine minutes drowns the number anyone actually wants. The combined
+median describes the machine, not the process.
 
-**"87.6% auto-decided" is a property of the applicant mix**, not an efficiency
-claim — and of a synthetic mix at that. It is quoted with its denominator
-everywhere it appears, for exactly this reason.
+**The auto-decided share is a property of the applicant mix**, not an
+efficiency claim — and of a synthetic mix at that. It is quoted with its
+denominator everywhere it appears, for exactly this reason.
 
-**The oldest case in the queue has been waiting 32 days**, which in a real firm
+**The oldest case in the queue has been waiting weeks**, which in a real firm
 would be an audit finding rather than a statistic. It is there because the
 seeder keeps a small floor of genuinely stuck cases, and it is what the red
 waiting-time styling on the desk exists to surface. A queue screen that never
@@ -630,8 +645,15 @@ approach, not a system that should go near a real customer. Specifically:
 - **No four-eyes principle.** One officer can approve any case alone. Real
   firms require a second reviewer above a threshold.
 - **No role separation.** Every signed-in user can decide anything.
-- **The browser is not tested.** CI typechecks the web service and asserts the
-  database contracts its server actions depend on, but nothing drives a page.
+- **The browser is mostly not tested.** CI typechecks the web service and
+  asserts the database contracts its server actions depend on, but nothing
+  drives a page. The one exception is the disclosure boundary: a dedicated CI
+  job boots Postgres, seeds, builds and starts the web app, and asserts that
+  the public applicant status page never reveals what sanctions screening
+  found. That job sets `STRICT_DISCLOSURE_TEST=1`, which turns every reason the
+  check could not run — no web service, no database, nothing seeded worth not
+  disclosing — into a failure rather than a skip, because a guard that silently
+  does not run is worse than no guard.
   A bug in a React component, or in the TypeScript above the SQL, would pass.
   One case is guarded by reading the source rather than running it: a test
   fails if the desk's `for update` ever becomes `for update skip locked`, which

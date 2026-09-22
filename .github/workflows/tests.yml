@@ -82,3 +82,102 @@ jobs:
       - name: Typecheck
         working-directory: web
         run: npx tsc --noEmit
+
+  disclosure:
+    name: disclosure boundary (web + worker + postgres)
+    runs-on: ubuntu-latest
+
+    # The only job that boots the web app. It exists for one test file:
+    # worker/tests/test_applicant_disclosure.py, which asserts that the public
+    # applicant status page never reveals what sanctions screening found.
+    #
+    # That assertion cannot be made against a typecheck or a mocked response —
+    # it is about the bytes a running server actually sends — so this job pays
+    # for a Postgres, a migration, a seed and a production build to make it.
+    #
+    # STRICT_DISCLOSURE_TEST=1 is the point of the whole job. Without it the
+    # tests skip when the app is unreachable, and a green tick would mean
+    # nothing. With it, every reason the check could not run becomes a failure.
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kyc
+          POSTGRES_PASSWORD: kyc
+          POSTGRES_DB: kyc
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kyc"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://kyc:kyc@localhost:5432/kyc
+      # The committed 25-entry fixture: no download, and its names are the ones
+      # the seeder deliberately collides applicants with.
+      SANCTIONS_SOURCE: synthetic
+      PUBLIC_BASE_URL: http://localhost:3001
+      SESSION_SECRET: ci-only-not-a-real-secret-0123456789abcdef
+      STAFF_EMAIL: officer@example.com
+      STAFF_PASSWORD: ci-only
+      DIDIT_MODE: simulator
+      NODE_ENV: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: worker/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          pip install -r worker/requirements.txt
+          npm ci --prefix web
+
+      - name: Migrate
+        run: python db/migrate.py up
+
+      - name: Seed something worth not disclosing
+        # Small, and deliberately not --force: on a fresh database there is
+        # nothing to double up.
+        run: python seed.py --count 160 --weeks 3 --seed 4242
+        working-directory: worker
+
+      - name: Build the web app
+        # Works without DATABASE_URL at build time because the pool is lazy —
+        # if that regresses, this step is where it shows up.
+        working-directory: web
+        run: npm run build
+
+      - name: Start the web app
+        working-directory: web
+        run: |
+          npm start &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3001/ >/dev/null; then
+              echo "web app up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "web app did not start within 60s"
+          exit 1
+
+      - name: Assert the disclosure boundary
+        working-directory: worker
+        env:
+          STRICT_DISCLOSURE_TEST: "1"
+        # -rs so the log says what happened rather than printing four dots.
+        run: python -m pytest tests/test_applicant_disclosure.py -v -rs

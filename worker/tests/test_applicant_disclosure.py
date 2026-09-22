@@ -22,9 +22,22 @@ markup and RSC payload together, for tokens that should not be anywhere in it.
 A narrower check on rendered text would miss precisely the regression that
 matters.
 
-Requires the web service to be running. Skips cleanly when it is not, in
-keeping with the rest of the suite — CI runs the worker and typechecks the web
-app but does not boot it, which is stated in the README's limitations.
+RUNNING IT, AND WHY IT IS NOT ALLOWED TO SKIP ON CI
+
+This needs a running web service, which the rest of the worker suite does not.
+Locally it skips politely when the app is not up, like everything else here.
+
+On CI it must not. A guard that silently does not run is worse than no guard,
+because the green tick is then evidence of nothing while looking like evidence
+of something — and this one is guarding a disclosure boundary rather than a
+rendering detail. The `disclosure` job in .github/workflows/tests.yml boots
+Postgres, migrates, seeds, builds and starts the web app, and sets
+STRICT_DISCLOSURE_TEST=1. In that mode every skip below becomes a failure: no
+web service is a failure, no reachable database is a failure, and a seeded
+dataset containing nothing to disclose is a failure too.
+
+That last one matters most. Without it the job could pass by finding no
+flagged application and skipping — green, and asserting precisely nothing.
 """
 
 from __future__ import annotations
@@ -40,6 +53,25 @@ import pytest
 psycopg = pytest.importorskip("psycopg")
 
 BASE_URL = os.environ.get("PUBLIC_BASE_URL") or "http://localhost:3001"
+
+#: Set by CI. Turns every "cannot check this here" into a failure.
+STRICT = os.environ.get("STRICT_DISCLOSURE_TEST") == "1"
+
+
+def unavailable(reason: str) -> None:
+    """Skip locally, fail on CI.
+
+    One helper rather than a flag threaded through each fixture, so there is
+    exactly one place where the difference lives and no way to add a fixture
+    later that quietly skips in strict mode.
+    """
+    if STRICT:
+        pytest.fail(
+            f"STRICT_DISCLOSURE_TEST=1 and the check could not run: {reason}. "
+            "On CI this is a failure rather than a skip — a disclosure guard "
+            "that does not run is worse than no guard."
+        )
+    pytest.skip(reason)
 
 #: The applicant's own name is the one thing from a screening match they are
 #: entitled to see — it is their name. Everything else about the match is not
@@ -75,7 +107,7 @@ def web_service():
     try:
         fetch("/")
     except (urllib.error.URLError, OSError) as err:
-        pytest.skip(f"web service not reachable at {BASE_URL}: {err}")
+        unavailable(f"web service not reachable at {BASE_URL}: {err}")
     return BASE_URL
 
 
@@ -98,15 +130,16 @@ def flagged_application(web_service):
 
     So it reads. The seeded history has plenty of these, and testing against
     real seeded rows is better evidence than testing against a row the test
-    wrote to its own specification. If none exists, it skips and says so rather
-    than inventing one.
+    wrote to its own specification. If none exists it says so — as a skip
+    locally, and as a failure under STRICT_DISCLOSURE_TEST, because a run that
+    found nothing to disclose has proved nothing about disclosure.
     """
     from db import database_url  # the worker's own DATABASE_URL resolver
 
     try:
         connection = psycopg.connect(database_url(), autocommit=True, connect_timeout=5)
-    except Exception as err:  # noqa: BLE001 — unreachable database means skip
-        pytest.skip(f"no database reachable: {err}")
+    except Exception as err:  # noqa: BLE001 — any connection problem
+        unavailable(f"no database reachable: {err}")
 
     try:
         with connection.cursor() as cur:
@@ -125,7 +158,7 @@ def flagged_application(web_service):
         connection.close()
 
     if row is None:
-        pytest.skip(
+        unavailable(
             "no seeded application carries a sanctions match — run "
             "worker/seed.py so there is something to fail to disclose"
         )
@@ -190,40 +223,42 @@ def test_the_officer_case_view_is_not_affected(web_service, flagged_application)
 
 
 def test_a_status_page_for_an_unknown_application_discloses_nothing(web_service):
-    """A wrong UUID must not confirm or deny that an application exists.
+    """A wrong UUID gets a 404, and says nothing either way.
 
-    ON THE STATUS CODE, which this test deliberately does not assert.
+    ON THE STATUS CODE, which this test now does assert.
 
-    An unknown application renders the not-found page but answers HTTP 200,
-    not 404. That is not a typo — it is caused by `loading.tsx` existing in
-    this segment. Next.js begins streaming the loading shell immediately, the
-    response headers are flushed, and by the time `notFound()` throws the
-    status can no longer be changed.
+    This used to answer HTTP 200 while rendering the not-found page, because
+    `loading.tsx` in this segment made Next.js begin streaming the loading
+    shell immediately: the response headers flushed, and by the time
+    `notFound()` threw, the status could no longer be set.
 
-    Measured, not guessed: moving `status/[id]/loading.tsx` aside makes the
-    same request answer 404, and putting it back makes it answer 200 again.
+    The shell was removed. It bought very little — the page is one indexed
+    lookup — and a public endpoint answering 200 for something that does not
+    exist is wrong in a way a technical reader notices immediately.
 
-    So it is a real trade between a correct status code and the loading state
-    that keeps the page from jumping when data arrives. Which one wins is a
-    product decision, not a bug to quietly fix, and it is recorded here so
-    whoever makes it can see the cost. What matters for THIS file is
-    disclosure, and on that the page is correct either way: the body says
-    nothing about whether the application exists.
+    A Suspense boundary inside the page, after the existence check, would have
+    kept both. It was not worth it here: it means splitting the two queries
+    that currently run in parallel into a sequential lookup plus a suspended
+    child, which is more moving parts than a sub-second query deserves.
     """
     try:
         status, body = fetch(f"/status/{uuid.uuid4()}")
     except urllib.error.HTTPError as err:
         status, body = err.code, err.read().decode("utf-8", "replace")
 
-    assert status in (200, 404), f"unexpected status {status}"
+    assert status == 404, (
+        f"expected 404 for an application that does not exist, got {status}. "
+        "If a loading.tsx has been added back to this segment, that is the "
+        "cause: streaming starts before notFound() can set the status."
+    )
 
     # The disclosure property, which is the point of this file.
     leaked = [token for token in FORBIDDEN_TOKENS if token.lower() in body.lower()]
     assert not leaked, f"the not-found page disclosed {leaked}"
-    # NOT "Your application": that heading is in the loading skeleton, which
-    # streams before the not-found content replaces it, so it is present in the
-    # response for any id at all. Asserting on it tested the skeleton rather
-    # than the page. A timeline entry only ever renders from real audit rows.
+    # A timeline entry only ever renders from real audit rows, so its absence
+    # is the check that no real application was served. (Asserting on the
+    # heading "Your application" would have been wrong even now: it used to
+    # appear in the loading skeleton for every id, including unknown ones.)
     assert "Application started" not in body, (
         "a real application's history rendered for an id that does not exist"
     )

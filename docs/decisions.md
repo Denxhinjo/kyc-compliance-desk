@@ -2345,3 +2345,82 @@ it 200 again.
 That is a real trade between a correct status code and a loading state that
 keeps the page from jumping, not a typo to fix in passing. Left as it is,
 recorded in the test, and flagged for a decision.
+
+---
+
+## Closing out: three small things, and what each one turned out to be
+
+### The 404 now really is a 404
+
+`/status/<unknown-id>` answered HTTP 200 while rendering the not-found page.
+`loading.tsx` in that segment made Next.js start streaming the loading shell
+immediately; the headers flushed, and by the time `notFound()` threw there was
+no status left to set.
+
+The shell is gone. It bought very little — the page is one indexed lookup — and
+a public endpoint answering 200 for something that does not exist is wrong in a
+way a technical reader notices straight away. A Suspense boundary inside the
+page, after the existence check, would have kept both; it was not worth
+splitting two parallel queries into a sequential lookup plus a suspended child
+for a sub-second page. The test asserts 404 now, and says in its own message
+what to look for if it ever goes back to 200.
+
+### The disclosure test was skipping on CI, silently
+
+Worth being exact, because this is the second time this shape has appeared.
+
+`test_applicant_disclosure.py` needs a running web service. CI had none, so the
+`web_service` fixture called `pytest.skip` and all four tests skipped. CI runs
+`pytest -q`, which prints `ssss` and no summary unless `-rs` is passed. So the
+job was green, the file existed, and it was asserting nothing — while guarding
+a disclosure boundary.
+
+This is the same failure as the lifecycle-trigger tests that passed only
+because the developer's database happened to be migrated. Both look like
+working tests. Both are a green tick standing in for evidence.
+
+Two changes. A `disclosure` job in CI now boots Postgres, migrates, seeds,
+builds and starts the web app, and runs the file against it. And
+`STRICT_DISCLOSURE_TEST=1` in that job turns every skip into a failure —
+including the subtle one, where the seeded data happens to contain no sanctions
+match and the test would otherwise pass by having nothing to check.
+
+The general rule this is the second instance of: **a test that can decline to
+run must be forced to run somewhere, or it is documentation.**
+
+### One number, three values — and it was not the page
+
+The auto-decided share appeared as 87.4%, 87.6% and 80.3%. The suspicion was a
+literal inside the explanatory paragraph on the stats page.
+
+It was not. That paragraph renders `{autoPercent}`, the same variable as the
+tile above it, so the two cannot disagree. 87.4% and 87.6% were readings from
+before the data was reseeded, quoted in prose written at the time.
+
+Which is the real problem, and a bigger one: the figures were correct on the
+page and stale everywhere they had been copied. The README published a table of
+them as a standing claim, the demo script had the presenter say "87.6%" aloud,
+the glossary used it as an example, and a comment in `latency()` asserted
+"around nine in ten decisions are automatic" when it had become four in five.
+
+Updating those to today's values would have re-staled them on the next reseed.
+So instead: the README table is now an explicitly dated snapshot with the exact
+seed commands that reproduce it; the demo script tells the presenter to read the
+number off the screen; the glossary example is marked as an illustration; and
+the code comment no longer states a ratio at all, with a line saying why.
+
+The principle the project already claimed — every figure computed from the
+database — turned out to apply to its own documentation, and did not survive
+first contact with a reseed.
+
+### A footnote on the data moving underfoot
+
+Halfway through checking the figures, `decided` went from 746 to 747 and the
+oldest pending case dropped from 41.8 days to 24. Not a bug and not a race:
+somebody had approved the forty-day-old case through the desk, by hand, while
+the numbers were being read. `staff:officer@example.com`, with a written
+reason, at 13:17 — the one non-seeded audit event in the database.
+
+Which is the system working exactly as intended, and a small demonstration of
+why a figure belongs on a page that recomputes it rather than in a table
+somebody typed.

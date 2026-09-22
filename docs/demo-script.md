@@ -33,8 +33,9 @@ Do not open the applicant form. Nobody wants to watch you type an address.
 
 Point at the oldest case, the one in red.
 
-> "That one's been waiting 32 days. In a real firm that's an audit finding, not
-> a statistic. The screen is built to make that uncomfortable to look at."
+> "That one's been waiting [read the number off the screen]. In a real firm
+> that's an audit finding, not a statistic. The screen is built to make that
+> uncomfortable to look at."
 
 ### 0:30 — Open a case. This is the screen nobody else shows (30s)
 
@@ -212,7 +213,11 @@ Add, in this order:
 - **Do not claim the vendor integration is tested.** It is written against
   published documentation and has never run against the live API. Say so before
   they ask.
-- **Do not quote a percentage without its denominator.** "87.6% auto-decided"
-  invites a challenge you cannot answer; "369 of 421 decided" does not.
-- **Do not hide the 32-day case.** Pointing at it first is what makes the rest
-  credible.
+- **Do not quote a percentage without its denominator.** "80% auto-decided"
+  invites a challenge you cannot answer; reading the tile aloud — the figure
+  *and* the "N of M decided" underneath it — does not. Read what is on the
+  screen rather than a number from this script: the share is a property of the
+  applicant mix and changes every time the data is reseeded.
+- **Do not hide the oldest case in the queue.** Whatever it is on the day —
+  it has been anywhere from three to six weeks — pointing at it first is what
+  makes the rest credible.

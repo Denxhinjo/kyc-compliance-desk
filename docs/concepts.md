@@ -398,9 +398,11 @@ latency figure here is a median.
 alongside the median because a median on its own hides a bad tail, and the tail
 is where the operational problem lives.
 
-**Denominator.** The base a percentage is computed over. "87.6%" is unverifiable;
-"369 of 421 decided" can be checked. Every percentage in this project carries
-one.
+**Denominator.** The base a percentage is computed over. A bare "87.6%" is
+unverifiable; "369 of 421 decided" can be checked. Every percentage in this
+project carries one. (Those two figures are an illustration, not a current
+reading — the live ones are on `/stats`, which is the only place any figure in
+this project should be quoted from.)
 
 **Small-n.** Too few observations for a statistic to mean anything. The stats
 page refuses to show a median below twenty decisions rather than presenting an

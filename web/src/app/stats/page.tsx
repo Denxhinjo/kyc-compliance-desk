@@ -86,11 +86,16 @@ async function latency(): Promise<Latency> {
   // experience, not ours. Measuring from "when screening finished" would
   // produce a much prettier number that answers a question nobody asked.
   // Split by who decided, because a single overall median is actively
-  // misleading here. Around nine in ten decisions are automatic and take
+  // misleading here. The large majority of decisions are automatic and take
   // seconds, so they dominate the median entirely and the combined figure
   // describes the machine rather than the process. The number anyone actually
   // wants — how long does it take when a human is involved — is the one the
   // combined median hides.
+  //
+  // Deliberately no ratio in this comment. It said "around nine in ten" and
+  // was written when that was true; the share is a property of the applicant
+  // mix and moves every time the data is reseeded, so a number here is a
+  // comment that goes quietly wrong. The page renders the real one.
   const { rows } = await pool.query<Latency>(
     `with recent as (
          select extract(epoch from (d.decided_at - a.created_at)) as seconds,
