@@ -224,7 +224,20 @@ class SanctionsIndex:
                     date_of_birth_conflict=conflict,
                 )
 
-        return sorted(best.values(), key=lambda m: m.score, reverse=True)
+        # Sorted by score, then by entity id to break ties.
+        #
+        # The tiebreak is not cosmetic. scoring.py takes the STRONGEST hit of
+        # each type, which with `max()` means the first of several equals — and
+        # equals are common: "Sa'ad Muhammad Yunis AL-AHMAD" matches three OFAC
+        # entities at exactly 100.00, two with no date-of-birth conflict and
+        # one with. Whichever is seen first decides whether the band is
+        # downgraded, which is a 15-point swing in the risk score.
+        #
+        # Before this, that order came from dict iteration over rapidfuzz's
+        # result positions: stable within a run, arbitrary between
+        # implementations, and not a property anybody had chosen. Sorting by
+        # entity id makes it a decision rather than an accident.
+        return sorted(best.values(), key=lambda m: (-m.score, m.entry.entity_id))
 
 
 def _dates_conflict(applicant: str | None, listed: str | None) -> bool:

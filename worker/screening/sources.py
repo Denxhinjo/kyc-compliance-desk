@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from .index import ListEntry, SanctionsIndex, build_index
+from .normalise import normalise_name
 
 log = logging.getLogger("worker.screening.sources")
 
@@ -333,3 +334,106 @@ def ensure_snapshot(conn, index: SanctionsIndex) -> int:
             (index.source, index.content_hash),
         )
         return cur.fetchone()[0]
+
+
+# ---------------------------------------------------------------------------
+# Loading the list INTO Postgres
+#
+# The other half of the move out of memory. `ensure_snapshot` above registers
+# which version of a list was used; this writes the list itself, so the worker
+# no longer has to hold it.
+# ---------------------------------------------------------------------------
+
+
+def load_into_postgres(conn, index: SanctionsIndex, *, batch: int = 1000) -> int:
+    """Write a loaded index's entries into the database, once.
+
+    Idempotent by snapshot: if the snapshot already has `entries_loaded_at`
+    set, this does nothing and says so. Re-running a downloader, or starting a
+    second worker, must not double the list — and `on conflict` on
+    (snapshot_id, entity_id) makes a partial re-run converge rather than
+    duplicate.
+
+    ORDER MATTERS. Rows are written first and `entries_loaded_at` is stamped
+    last, in the same transaction. A load that dies halfway therefore leaves a
+    snapshot that the matcher will refuse to use, rather than one that silently
+    under-matches. Stamping first would invert that, and an under-matching
+    sanctions screen is the failure that looks like success.
+    """
+    snapshot_id = ensure_snapshot(conn, index)
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "select entries_loaded_at is not null from sanctions_snapshots where id = %s",
+            (snapshot_id,),
+        )
+        already = cur.fetchone()[0]
+    if already:
+        log.info("snapshot %s already loaded — nothing to write", snapshot_id)
+        return snapshot_id
+
+    log.info("writing %d entries into snapshot %s", len(index), snapshot_id)
+
+    with conn.transaction():
+        with conn.cursor() as cur:
+            for start in range(0, len(index.entries), batch):
+                chunk = index.entries[start : start + batch]
+                for entry in chunk:
+                    cur.execute(
+                        """
+                        insert into sanctions_entries
+                            (snapshot_id, entity_id, name, entity_type,
+                             list_name, countries, date_of_birth)
+                        values (%s, %s, %s, %s, %s, %s, %s)
+                        on conflict (snapshot_id, entity_id) do nothing
+                        returning id
+                        """,
+                        (
+                            snapshot_id,
+                            entry.entity_id,
+                            entry.name,
+                            entry.entity_type,
+                            entry.list_name,
+                            list(entry.countries),
+                            entry.date_of_birth,
+                        ),
+                    )
+                    row = cur.fetchone()
+                    if row is None:
+                        # Already present from a partial earlier run.
+                        continue
+                    entry_pk = row[0]
+
+                    for position, spelling in enumerate((entry.name, *entry.aliases)):
+                        normalised = normalise_name(spelling)
+                        if not normalised:
+                            continue
+                        cur.execute(
+                            """
+                            insert into sanctions_names
+                                (entry_id, spelling, normalised, is_primary)
+                            values (%s, %s, %s, %s)
+                            returning id
+                            """,
+                            (entry_pk, spelling, normalised, position == 0),
+                        )
+                        name_pk = cur.fetchone()[0]
+
+                        # One row per token. Duplicates within a spelling are
+                        # dropped — "Ali Ali Hassan" gains nothing from two
+                        # identical index entries.
+                        for token in sorted(set(normalised.split())):
+                            cur.execute(
+                                "insert into sanctions_name_tokens "
+                                "(name_id, entry_id, token) values (%s, %s, %s)",
+                                (name_pk, entry_pk, token),
+                            )
+
+            # Last, and inside the same transaction.
+            cur.execute(
+                "update sanctions_snapshots set entries_loaded_at = now() where id = %s",
+                (snapshot_id,),
+            )
+
+    log.info("snapshot %s loaded and marked searchable", snapshot_id)
+    return snapshot_id

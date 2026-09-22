@@ -2424,3 +2424,124 @@ reason, at 13:17 — the one non-seeded audit event in the database.
 Which is the system working exactly as intended, and a small demonstration of
 why a figure belongs on a page that recomputes it rather than in a table
 somebody typed.
+
+---
+
+## Phase 1: the sanctions list moves into Postgres
+
+The worker held the list in memory: 19,393 entries, 44,017 searchable
+spellings, 86MB resident. Fine for a process that runs for weeks, impossible
+for one that must start, answer and exit. Loading 86MB per invocation is not a
+slow function, it is a function that cannot exist.
+
+So: **Postgres narrows, Python scores.** A trigram GIN index over individual
+name tokens turns tens of thousands of candidates into a handful; rapidfuzz
+then scores that handful with exactly the code that ran before.
+
+### The safety net came first, and it earned its place
+
+A silent change in who gets flagged is the worst outcome available here —
+nobody sees it, the tests stay green, and the only evidence is a different set
+of people being refused accounts. So the equivalence test was written before
+the new matcher was trusted, comparing both over 400 seeded applicants on the
+matched entities, the strengths, the matched spelling, the date-of-birth
+conflict flag, the resulting score and the routing.
+
+It found three real bugs. Every one would have shipped.
+
+### Bug 1: the pre-filter was second-guessing the scorer
+
+13 of 400 applicants lost a real match. All in the same direction — missed by
+the shortlist, never a false positive, never a different score.
+
+Stage 1 required two trigram-matched tokens, mirroring the Python rule that two
+name parts must correspond. It looked right and was wrong, because it applied
+that rule with a **different similarity metric** from the one stage 2 uses, and
+the two disagree badly on short tokens and substrings:
+
+| | `fuzz.ratio` (stage 2, accepts >= 70) | trigram (stage 1, accepted >= 0.35) |
+| --- | --- | --- |
+| chen / jicheng | 72.7 accept | 0.22 reject |
+| mei / limei | 75.0 accept | 0.33 reject |
+| khalil / khani | 72.7 accept | 0.22 reject |
+
+The lesson generalises well past this file: **a cheap pre-filter must only ever
+widen.** The moment it reimplements the expensive filter's judgement with a
+cheaper metric it can disagree with it, and every disagreement is a miss nobody
+sees. Stage 1 now asks the weakest useful question — does this entry share any
+plausible name part? — and leaves every decision to stage 2.
+
+### Bug 2: a tie-break nobody had chosen
+
+One applicant produced identical matches from both matchers and a different
+risk score: 60 against 75.
+
+That applicant matches three OFAC entities at exactly 100.00. Two have no
+date-of-birth conflict; one does. `scoring.py` takes the strongest hit of each
+type, which with `max()` means the first of several equals — so whichever the
+matcher happened to list first decided whether the band was downgraded, a
+15-point swing.
+
+That order came from dict iteration over rapidfuzz result positions: stable
+within a run, arbitrary between implementations, and not a property anyone had
+chosen. **This was pre-existing non-determinism in the original matcher**, not
+something the migration introduced; the migration just made it visible by
+running two implementations side by side. Both now sort by score then entity
+id, which makes it a decision rather than an accident.
+
+### Bug 3: a filter invented for the new path, and not in the old one
+
+"Jing Li" returned nothing at all. A `MIN_TOKEN_LENGTH = 3` guard — added
+because trigram similarity is unreliable on very short strings, which is true —
+dropped "li", left a single usable token, and tripped a two-token check.
+
+Four real matches lost, including "Ying LI" at 85.7. And the cruel part: the
+entry's own token "li" is an **exact** match and would have shortlisted it
+instantly. The cheap filter discarded the strongest available signal because it
+looked weak in isolation. The guard is gone; every token shortlists now.
+
+### The threshold, set by measurement
+
+Lowered until the equivalence test found nothing:
+
+| trigram threshold | applicants losing a match |
+| --- | --- |
+| 0.35 | 13 of 400 |
+| 0.30 | 1 of 400 |
+| **0.25** | **0 of 400** |
+
+Shortlist: **27.3 entries on average**, worst case 1,808, from 19,393 — 0.141%
+of the list.
+
+### What it costs
+
+| | median | p90 | worst | at boot |
+| --- | --- | --- | --- | --- |
+| In memory | 105 ms | 126 ms | 173 ms | 86 MB, 229 s to load |
+| Two-stage | **45 ms** | 115 ms | 456 ms | nothing |
+
+Faster at the median, worse in the tail — the tail being the 1,808-candidate
+shortlists where stage 2 has real work to do. The comparison flatters the old
+matcher anyway, because its column excludes the boot cost that is the entire
+reason for the change.
+
+### What was kept
+
+`sanctions_snapshots` survives intact, and entries hang off it: one row per
+entity **per snapshot**, so a later correction to a name cannot silently
+rewrite what an earlier screening saw. `screening_results.snapshot_id` still
+points at the version that produced the match. The provenance chain — decision
+to match to list version to sha256 — is unbroken.
+
+One new column earns its place: `entries_loaded_at`. A snapshot row exists from
+the moment a version is registered, but its entries are written afterwards and
+that write can fail halfway. Rows are written first and the stamp set last, in
+one transaction, so a half-finished load leaves a snapshot the matcher refuses
+to use — rather than one that silently under-matches, which is this system's
+worst failure mode because the result looks clean.
+
+### Still to fix
+
+Loading takes **229 seconds** for 19,393 entries, row by row. Tolerable once
+against a local database, and it will be considerably worse over the network to
+a hosted one. It wants `COPY`, and it will get it before Phase 3.
