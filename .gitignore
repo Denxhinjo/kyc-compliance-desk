@@ -30,3 +30,9 @@ Thumbs.db
 .idea/
 .vercel
 .env*
+
+# LaTeX build artefacts. The .tex and the .pdf are committed; nothing else.
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc
