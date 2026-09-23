@@ -7,6 +7,27 @@ import {
 } from "./timeline-copy";
 import { AutoRefresh } from "./auto-refresh";
 
+/**
+ * Never indexed.
+ *
+ * This page is addressed by an application's UUID and needs no login, so the
+ * only thing keeping one applicant's status private is that nobody else knows
+ * the id. A search engine that learns one — from a pasted link, a referrer, a
+ * browser extension — would publish it permanently.
+ *
+ * Every applicant here is invented, so nothing real is exposed. It is set
+ * anyway, because a system that would index a customer's onboarding status if
+ * the data were real is modelling the wrong thing, and this demo is read as a
+ * model.
+ *
+ * Paired with a disallow in robots.ts. Both, deliberately: robots.txt asks a
+ * crawler not to FETCH the page, and this tells one that already has it not to
+ * KEEP it.
+ */
+export const metadata = {
+  robots: { index: false, follow: false, nocache: true },
+};
+
 export const dynamic = "force-dynamic";
 
 interface ApplicationRow {

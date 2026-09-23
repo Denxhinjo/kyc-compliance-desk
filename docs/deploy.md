@@ -200,12 +200,61 @@ production build of the app *from the repository root*, where it read the same
 result was a green, `Ready` deployment serving `NOT_FOUND` for every route —
 which happened twice before the pattern was visible.
 
-It is disconnected now and deploys by CLI:
+It is disconnected for now and deploys by CLI:
 
 ```bash
 cd web && npx vercel deploy --prod
 ```
 
-The better fix is to set the web project's **Root Directory to `web`** in the
-Vercel dashboard, which would make pushes build the app correctly and restore
-automatic deployment. The CLI does not expose that setting.
+### The permanent fix — do this in the dashboard
+
+Setting the Root Directory tells Vercel where the app actually lives, so a
+Git-triggered build runs `next build` inside `web/` and never sees the drain's
+`vercel.json` at all.
+
+1. **Vercel → the `kyc-compliance-desk` project → Settings → Build and
+   Deployment.**
+2. Under **Root Directory**, enter `web` and save. Leave "Include files outside
+   the root directory" **off** — the app needs nothing above `web/`, and
+   turning it on is what would let the root `vercel.json` back in.
+3. Confirm the Framework Preset now reads **Next.js**. If it still says "Other",
+   the root directory has not taken effect and step 2 did not save.
+4. **Settings → Git → Connect Git Repository**, and reconnect
+   `Denxhinjo/kyc-compliance-desk`. Production branch `master`.
+
+**What this restores:** every push to `master` deploys the app automatically,
+and `cd web && npx vercel deploy --prod` becomes a convenience rather than the
+only way to ship.
+
+### How to know it actually worked
+
+Do not trust a green deployment — a green deployment serving nothing is exactly
+the failure this fixes. Push a trivial change and check all three:
+
+```bash
+git commit --allow-empty -m "check vercel root directory" && git push
+```
+
+1. **The build log mentions Next.js.** Vercel → Deployments → the new one →
+   Building. Look for `Traced Next.js server files` or `Creating an optimized
+   production build`. A build that finishes in under ten seconds and says
+   `nothing to build` is the broken shape.
+
+2. **The site answers.** The single most useful check, because it tests the
+   alias rather than the build:
+
+   ```bash
+   curl -s -o /dev/null -w "%{http_code}
+" https://kyc-compliance-desk.vercel.app/stats
+   ```
+
+   `200` is correct. **`404` means the alias is pointing at an empty build
+   again** — the same symptom as before, and the thing to watch for.
+
+3. **The deployment you are looking at is the one serving.** `npx vercel ls
+   kyc-compliance-desk` from `web/`; the newest Ready deployment should be the
+   one holding `kyc-compliance-desk.vercel.app`.
+
+If step 2 returns 404 after a push, the root directory did not stick.
+Disconnect Git again and fall back to the CLI — the site works either way, and
+a manual deploy is a smaller problem than a silently empty one.

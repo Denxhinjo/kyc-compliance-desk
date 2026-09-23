@@ -20,17 +20,23 @@ export default async function LoginPage() {
       <h1>Compliance review desk</h1>
       <p className="sub">Staff sign-in.</p>
 
-      <div className="panel">
-        <LoginForm demoEmail={demoEmail} />
-      </div>
-
+      {/* Above the form, not below it. It used to sit underneath as a small
+          amber footnote, which is a good way to publish something nobody
+          reads — the credentials were on the page the whole time and still
+          read as "no way in". */}
       {demoPassword && (
         <p className="notice">
-          Demo credentials: <code>{demoEmail}</code> / <code>{demoPassword}</code>
-          . Printed here because this is a demonstration with invented
-          applicants and no real data behind it.
+          <strong>Open demo.</strong> Sign in with the button below, or use{" "}
+          <code>{demoEmail}</code> / <code>{demoPassword}</code>. The password
+          is printed because there is nothing behind it to protect: every
+          applicant in here is invented and no real person&apos;s data has ever
+          been in this system.
         </p>
       )}
+
+      <div className="panel">
+        <LoginForm demoEmail={demoEmail} demoPassword={demoPassword} />
+      </div>
     </main>
   );
 }

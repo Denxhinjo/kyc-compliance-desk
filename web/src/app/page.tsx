@@ -31,7 +31,8 @@ export default function Home() {
           <strong>Compliance review desk →</strong>
           <span>
             The most important screen here. The queue of cases automation
-            referred to a human, and the evidence needed to decide them.
+            referred to a human, and the evidence needed to decide them.{" "}
+            <strong>Open with a demo account — one click, no sign-up.</strong>
           </span>
         </Link>
         <Link className="home-link" href="/apply">

@@ -374,6 +374,38 @@ label {
   color: var(--text);
 }
 
+/* The one-click way into the desk. Given the accent rather than the neutral
+   button ground because it is the action almost every visitor wants, and the
+   manual form underneath is the fallback rather than the main path. */
+.demo-signin {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--text);
+  display: block;
+  width: 100%;
+}
+.demo-signin:hover:not(:disabled) {
+  background: var(--accent-muted);
+}
+
+/* Separates the one-click path from the manual one. A rule either side so it
+   reads as a divider rather than a heading. */
+.or-divider {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  font-size: var(--text-xs);
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+.or-divider::before,
+.or-divider::after {
+  background: var(--border);
+  content: "";
+  flex: 1;
+  height: 1px;
+}
+
 /* A button that is really a link — "sign out" in the desk bar. */
 .linkish {
   background: none;
