@@ -127,10 +127,85 @@ logging — several places neither you nor I control.
 
 ## What a visitor actually experiences
 
-To be measured against the live deployment, not estimated:
+Measured against the live deployment, not estimated.
 
-- cold start after the database has been idle for days
-- warm request latency
-- time from submitting an application to seeing a decision
+### After the database has gone to sleep
 
-Filled in once the deployment exists.
+Neon suspends a free-tier compute after about five minutes of inactivity. To
+measure a real resume rather than guess at one, the cron was disabled, the
+database left alone for seven minutes, and the first request timed:
+
+| | cold | warm |
+| --- | --- | --- |
+| `/stats` — the first page that queries | **2437 ms** | 308 ms |
+| `/` | 309 ms | 323 ms |
+| `/desk` | 589 ms | 556 ms |
+
+So: **one page load of about two and a half seconds, then everything is
+normal.** The resume costs roughly 2.1 s of that, and it is paid once by
+whoever arrives first — every page after it is served in around 300 ms.
+
+Measured separately at the connection level, Neon's resume is **669 ms**; the
+rest of the 2.4 s is the page's own queries and a transatlantic round trip from
+the machine doing the measuring.
+
+**In practice this almost never happens.** The drain cron runs every five
+minutes and Neon's autosuspend is five minutes, so the database is kept awake
+by the heartbeat. A visitor only meets a cold start if the cron has stopped —
+which GitHub does after 60 days of repository inactivity. A demo nobody has
+touched for two months therefore costs its next visitor two and a half seconds,
+and nothing after that.
+
+### The pipeline, end to end
+
+From `scripts/verify-live.mjs`, which drives a real browser through the live
+site:
+
+```
+1. Submit an application through the live form        ✓ created
+2. Complete identity verification (simulator)         ✓ outcome submitted
+3. Wait for the pipeline to reach a decision          ✓ DECIDED after 12.1s
+4. Sign in to the review desk                         ✓
+5. Open the case and read the evidence                ✓ score 60, OFAC shown,
+                                                        5 matches at 100%
+6. Stats page recomputes                              ✓ 638 processed,
+                                                        13 awaiting review
+```
+
+**Twelve seconds from submitting to a decision**, most of which is the vendor
+simulator and the polling interval of the check itself rather than the
+pipeline.
+
+### The drain function
+
+| | |
+| --- | --- |
+| Cold start | 1.64 s |
+| Warm | ~0.45 s |
+| Work, once running | 5–80 ms for a batch of five |
+
+---
+
+## A trap worth knowing about
+
+**The web project must not be connected to the Git repository.**
+
+Both Vercel projects build from this one repo. The drain builds from the
+repository root and reads the `vercel.json` there, which is its own config and
+says there is nothing to build. That is correct — for the drain.
+
+While the web project was also Git-connected, every push triggered an automatic
+production build of the app *from the repository root*, where it read the same
+`vercel.json`, built nothing, succeeded, and took the production alias. The
+result was a green, `Ready` deployment serving `NOT_FOUND` for every route —
+which happened twice before the pattern was visible.
+
+It is disconnected now and deploys by CLI:
+
+```bash
+cd web && npx vercel deploy --prod
+```
+
+The better fix is to set the web project's **Root Directory to `web`** in the
+Vercel dashboard, which would make pushes build the app correctly and restore
+automatic deployment. The CLI does not expose that setting.
