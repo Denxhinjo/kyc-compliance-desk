@@ -1,5 +1,6 @@
 import { withTransaction } from "@/lib/db";
 import { enqueueJob } from "@/lib/jobs";
+import { after } from "next/server";
 import { nudgeWorker } from "@/lib/nudge";
 import { verifyWebhookSignature, type DiditWebhookEnvelope } from "@/lib/didit";
 
@@ -123,8 +124,13 @@ export async function POST(request: Request): Promise<Response> {
 
   // AFTER the transaction committed, never inside it. The work is durable at
   // this point; this only shortens the wait from "next scheduled drain" to
-  // "seconds". Not awaited, and incapable of throwing — see lib/nudge.ts.
-  nudgeWorker("webhook");
+  // "seconds".
+  //
+  // Inside after(), which is load-bearing: the response is already on its way
+  // to the vendor, and Vercel freezes the instance once it lands. A bare
+  // fire-and-forget fetch here is killed before it connects — see lib/nudge.ts
+  // for how long that took to notice.
+  after(() => nudgeWorker("webhook"));
 
   return Response.json(
     { received: true, duplicate: false, job_id: result.jobId },
