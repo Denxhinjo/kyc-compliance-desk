@@ -2545,3 +2545,153 @@ worst failure mode because the result looks clean.
 Loading takes **229 seconds** for 19,393 entries, row by row. Tolerable once
 against a local database, and it will be considerably worse over the network to
 a hosted one. It wants `COPY`, and it will get it before Phase 3.
+
+---
+
+## Phase 3: live on free tiers
+
+Vercel for the app, Neon for Postgres, GitHub Actions for the periodic drain.
+Nothing billed.
+
+**Two Vercel projects from one repository.** The Next app is in `web/` and the
+drain function needs `worker/`, which is outside it; Vercel's root directory
+can only be one of the two. Rather than vendor the worker into `web/` at build
+time, they deploy separately — which is also the honest description, since they
+really are two services sharing one database.
+
+### Step 0 was the right thing to check first
+
+Everything in Phase 1 rests on `pg_trgm`, and a hosted Postgres is entitled to
+refuse an extension. Neon has it, at **1.6 — the same version as local**, with
+`gin_trgm_ops` present and `similarity('ahmed','ahmad')` returning 0.333,
+identical to the local measurement. All 19 migrations then applied cleanly
+despite Neon running PostgreSQL 18.6 against a local 16.
+
+Had that failed, the whole two-stage matching design would have needed
+rethinking, and finding out after provisioning a domain would have been worse.
+
+### Seven things broke. Six were configuration.
+
+Worth listing, because the shape is the lesson: almost nothing that broke was
+logic, and almost everything was the difference between a machine and a
+platform.
+
+**1. Vercel builds Python with the newest CPython it has.** That is 3.14.7, and
+`psycopg-binary` published no `cp314` wheel before 3.2.10. A `.python-version`
+pinning 3.12 was tried first and Vercel ignored it, so it was deleted rather
+than left behind looking like it did something. Moved forward instead: psycopg
+3.2.13 pinned in *both* requirements files, because a function running a
+different driver from the worker is a difference that only appears in
+production. The suite passes on it.
+
+**2. A carriage return in a header.** An authorised POST came back as a bare
+`400` from the edge, never reaching the function. The secret had been written
+to a file on Windows and read back with `tr -d '\n'`, which leaves the `\r` —
+and a CR inside a header value makes the request malformed. My bug, not the
+endpoint's; and because the same pipeline had set the environment variable, the
+stored secret carried the same CR and had to be fixed in both places.
+
+**3. `more` was permanently true.** `queue_depth` counts every queued row, and
+the sweeper and the retention cleanup always sit queued with `run_after`
+minutes or hours ahead. Not cosmetic: the cron loops while `more` says there is
+work, so every scheduled run would have made its full twelve calls and claimed
+nothing on eleven of them. It now counts only what is claimable *now*.
+
+**4. Vercel refuses to deploy Next.js 15.5.4** — a known vulnerability. Forced
+upgrade to 15.5.26.
+
+**5. The drain project had no `PUBLIC_BASE_URL` or `DIDIT_MODE`.** The worker
+calls the vendor to fetch a verification result, and in this demo the vendor is
+the simulator inside the web app. Without those it used the defaults and tried
+`http://localhost:3001` from inside a Vercel function: `Connection refused`.
+
+The retry machinery is what made this legible — the job came back `queued` with
+`attempts 1` and the error on the row, rather than vanishing. Worth noticing
+that the thing which made a deployment mistake diagnosable was a correctness
+feature built for a different reason.
+
+**6. The production alias drifted.** Every route on the web app returned
+`NOT_FOUND` while the deployment it pointed at was `Ready`. A redeploy
+reattached it. No explanation found and none invented; it is recorded because
+the first instinct was to look for a bug in the app, and there wasn't one.
+
+### 7. The one that was actually interesting
+
+The nudge did not work, and it failed in the most expensive way: the webhook
+returned 200, the job sat queued, and nothing in any log said why.
+
+`nudgeWorker` started a `fetch` and returned without awaiting it — deliberately,
+on the reasoning that nobody should wait for a doorbell. That reasoning is
+correct on a long-lived server and **wrong on a function**. Vercel freezes the
+instance the moment the response is flushed, so an in-flight request with
+nobody awaiting it is killed before the connection is even established.
+
+The request never left the building, and nothing was there to report it.
+
+Next's `after()` exists for exactly this: it runs a callback after the response
+has been sent but keeps the invocation alive until it finishes. The applicant
+still waits for nothing; the nudge now actually happens.
+
+The timeout was raised from 2s to 8s at the same time, because the drain is
+itself a function with a measured cold start of about 1.6 seconds — a 2s budget
+was timing out on precisely the invocation that most needed to succeed.
+
+There is a general lesson under this one. "Fire and forget" is not a thing a
+serverless function can do. Anything after the response either runs inside a
+mechanism the platform knows about, or does not run at all.
+
+### Proven, not assumed
+
+`scripts/verify-live.mjs` drives a real browser through the live site: submit
+an application, complete verification, wait for a decision, sign in to the
+desk, read the evidence, check the stats. Repeatable, not a one-off.
+
+```
+1. Submit an application through the live form        ✓ created
+2. Complete identity verification (simulator)         ✓ outcome submitted
+3. Wait for the pipeline to reach a decision          ✓ DECIDED after 12.9s
+4. Sign in to the review desk                         ✓
+5. Open the case and read the evidence                ✓ score 60, OFAC shown,
+                                                        5 matches at 100%
+6. Stats page recomputes                              ✓ 638 processed,
+                                                        12 awaiting review
+```
+
+That is a real job claimed and completed by the function, not an endpoint
+answering 200. The distinction matters: the endpoint answered 200 throughout
+every one of the failures above.
+
+The cron was verified from the GitHub runner rather than from a laptop, which
+is where it actually has to work: authenticated, drained, exited in 3s, and
+stopped after one call because `more` was finally honest.
+
+### 8. The alias kept dying, and the cause was a second project
+
+Twice the web app's production alias started returning `NOT_FOUND` for every
+route while the deployment it named was `Ready`. The first time it looked like
+a Vercel glitch and a redeploy fixed it. The second time the pattern was
+visible: it broke immediately after a `git push`, both times.
+
+The web project was still connected to the GitHub repository, so every push
+triggered an automatic production build — **from the repository root**, not
+from `web/`. And the repository root contains the *drain* project's
+`vercel.json`, which says, accurately for the drain and disastrously for the
+app:
+
+```json
+"framework": null,
+"buildCommand": "echo 'nothing to build - this project is one Python function'"
+```
+
+So each push produced a perfectly successful deployment containing no routes,
+which then took the production alias. Ready, green, and serving nothing.
+
+Disconnected the web project from Git; it deploys by CLI. The better fix is to
+set its Root Directory to `web` in the dashboard, which would make pushes build
+the app correctly and restore automatic deployment — that needs a setting the
+CLI does not expose.
+
+The lesson is about the cost of two projects in one repository, which was the
+right call for a different reason: they do not merely deploy separately, they
+can actively break each other, because config at the root is not namespaced to
+whoever wrote it.
