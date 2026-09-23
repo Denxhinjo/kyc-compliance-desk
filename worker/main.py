@@ -39,8 +39,12 @@ from config import (
 )
 from db import Database
 from handlers import PermanentError, get_handler
-from jobs import Job, claim_job, claim_job_naively, complete_job, fail_job, reclaim_stale_jobs
-from screening.sources import preload
+from jobs import Job, claim_job, claim_job_naively, reclaim_stale_jobs
+# Re-exported: tests and drain.py both reach for run_job, and it lives in
+# runner.py so that neither entry point owns it. See runner.py's docstring.
+from runner import run_job  # noqa: F401
+from db import connect as db_check
+from screening.store import active_snapshot
 
 logging.basicConfig(
     level=logging.INFO,
@@ -106,52 +110,6 @@ def _request_shutdown(signum: int, _frame: FrameType | None) -> None:
     log.info("signal %s received — finishing current job, then stopping", signum)
 
 
-def run_job(conn: psycopg.Connection, job: Job) -> None:
-    """Execute one claimed job and record how it went.
-
-    The handler's database writes and the 'done' update share ONE transaction,
-    so a job cannot be marked finished unless its effects committed, and its
-    effects cannot commit without the job being marked finished.
-
-    What this does NOT protect is external I/O. A handler that calls a vendor
-    API and then fails to commit will call that API again on the retry, because
-    an HTTP request cannot be rolled back. That is not a gap in this code — it
-    is what distributed systems are. You get AT-LEAST-ONCE delivery, and the
-    obligation that follows is that handlers must be idempotent: safe to run
-    twice. The same word, and the same idea, as the webhook handling in Phase 3.
-    """
-    started = time.monotonic()
-    try:
-        handler = get_handler(job.job_type)
-        with conn.transaction():
-            handler(conn, job)
-            complete_job(conn, job.id)
-    except PermanentError as err:
-        fail_job(conn, job, str(err), permanent=True)
-        log.error("job %s %s PARKED (permanent): %s", job.id, job.job_type, err)
-    except Exception as err:
-        # Keep the traceback in the log for a human, but store only the message
-        # on the row — last_error is read in a list view, not a debugger.
-        log.debug("job %s failed", job.id, exc_info=True)
-        status, delay = fail_job(conn, job, f"{type(err).__name__}: {err}")
-        if status == "parked":
-            log.error(
-                "job %s %s PARKED after %s/%s attempts: %s",
-                job.id, job.job_type, job.attempts, job.max_attempts, err,
-            )
-        else:
-            log.warning(
-                "job %s %s failed (attempt %s/%s), retrying in %.1fs: %s",
-                job.id, job.job_type, job.attempts, job.max_attempts, delay, err,
-            )
-    else:
-        elapsed = (time.monotonic() - started) * 1000
-        log.info(
-            "job %s %s done (attempt %s, %.0fms)",
-            job.id, job.job_type, job.attempts, elapsed,
-        )
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="KYC job queue worker")
     parser.add_argument(
@@ -183,17 +141,28 @@ def main() -> int:
     # in a try: a worker that cannot load its list would claim screening jobs and
     # fail every one, and a crash loop is far easier to notice than a worker
     # quietly parking everything it touches. See screening/sources.preload.
-    started = time.monotonic()
-    index = preload(SANCTIONS_SOURCE, fallback=SANCTIONS_FALLBACK)
+    # The list is in Postgres now, so there is nothing to load into memory —
+    # this only checks that a searchable version exists. The worker used to
+    # spend 86MB and fifteen seconds here.
+    #
+    # Refusing to start is deliberate. A worker with no list would claim every
+    # screening job and park it, and a queue full of parked jobs is a far
+    # quieter failure than a process that will not boot.
+    with db_check() as conn:
+        snapshot = active_snapshot(conn, SANCTIONS_SOURCE)
+    if snapshot is None:
+        log.error(
+            "no fully-loaded %r sanctions snapshot. Run: python load_sanctions.py",
+            SANCTIONS_SOURCE,
+        )
+        return 1
     resident = _resident_mb()
     log.info(
-        "sanctions list ready: %d entries from %r in %.2fs%s",
-        len(index),
-        # index.source, not SANCTIONS_SOURCE: if the fallback was taken these
-        # differ, and the log must say what is actually loaded.
-        index.source,
-        time.monotonic() - started,
-        f", RSS {resident:.0f}MB" if resident is not None else "",
+        "sanctions list ready: %s entries from %r, published %s%s",
+        f"{snapshot.record_count:,}",
+        snapshot.source,
+        snapshot.published_at or "unknown",
+        f" (RSS {resident:.0f}MB)" if resident is not None else "",
     )
 
     db = Database()

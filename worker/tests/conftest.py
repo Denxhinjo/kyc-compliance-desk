@@ -118,6 +118,27 @@ def schema(database_url: str) -> str:
     return database_url
 
 
+@pytest.fixture(scope="session", autouse=True)
+def sanctions_list(schema: str):
+    """Put the committed synthetic list into the test database.
+
+    Since the list moved out of the worker's memory and into Postgres, a
+    screening job needs a loaded snapshot the way it used to need a file. A
+    database with no list is not a neutral starting point any more — it is a
+    worker that cannot screen.
+
+    Autouse and session-scoped because it is cheap (25 entries) and because
+    every DB-backed test that touches screening would otherwise have to
+    remember to ask for it, and the one that forgot would fail confusingly.
+    """
+    import psycopg
+
+    from screening.sources import load_index, load_into_postgres
+
+    with psycopg.connect(schema, autocommit=True, connect_timeout=5) as conn:
+        load_into_postgres(conn, load_index("synthetic"))
+
+
 @pytest.fixture(scope="session")
 def db(schema: str):
     """One committed connection for tests that do not need isolation."""

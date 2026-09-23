@@ -33,7 +33,11 @@ from scoring import (
     ScreeningHit,
     score_application,
 )
-from screening.sources import ensure_snapshot, load_index
+# The database-backed matcher. Postgres narrows with a trigram index, rapidfuzz
+# scores the shortlist — the same scoring code the in-memory matcher used, and
+# proven identical over 400 applicants in tests/test_equivalence.py.
+from screening.store import active_snapshot
+from screening.store import search as search_list
 
 log = logging.getLogger("worker.screening")
 
@@ -60,20 +64,30 @@ def run_screening(conn: psycopg.Connection, job: Job) -> None:
         )
         return
 
-    index = load_index(SANCTIONS_SOURCE)
+    # The list lives in Postgres now, not in this process. `active_snapshot`
+    # returns the newest FULLY LOADED version — a snapshot whose rows are still
+    # being written is refused, because screening against half a list would
+    # under-match and look like a clean result.
+    snapshot = active_snapshot(conn, SANCTIONS_SOURCE)
+    if snapshot is None:
+        raise PermanentError(
+            f"no fully-loaded {SANCTIONS_SOURCE!r} sanctions snapshot. "
+            "Run: python load_sanctions.py"
+        )
 
-    # Record WHICH version of the list this run used, before using it. Every
-    # match written below points at this row, so a decision can be traced back
-    # to the exact list content that informed it — the question an auditor
-    # actually asks, and one that could not be answered before migration 018.
-    snapshot_id = ensure_snapshot(conn, index)
+    # Every match written below points at this snapshot, so a decision can be
+    # traced back to the exact list content that informed it — the question an
+    # auditor actually asks.
+    snapshot_id = snapshot.snapshot_id
 
-    matches = index.search(
+    matches = search_list(
+        conn,
+        snapshot,
         application["full_name"],
         date_of_birth=str(application["date_of_birth"]),
     )
 
-    _store_matches(conn, application_id, index.source, matches, snapshot_id)
+    _store_matches(conn, application_id, snapshot.source, matches, snapshot_id)
 
     profile = ApplicantProfile(
         country=application["address_country"],
@@ -96,7 +110,7 @@ def run_screening(conn: psycopg.Connection, job: Job) -> None:
     assessment = score_application(profile)
 
     _store_assessment(
-        conn, application, assessment, len(matches), index.source, snapshot_id
+        conn, application, assessment, len(matches), snapshot.source, snapshot_id
     )
     _route(conn, application, assessment)
 

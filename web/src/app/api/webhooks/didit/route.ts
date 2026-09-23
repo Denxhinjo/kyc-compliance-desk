@@ -1,5 +1,6 @@
 import { withTransaction } from "@/lib/db";
 import { enqueueJob } from "@/lib/jobs";
+import { nudgeWorker } from "@/lib/nudge";
 import { verifyWebhookSignature, type DiditWebhookEnvelope } from "@/lib/didit";
 
 /**
@@ -119,6 +120,12 @@ export async function POST(request: Request): Promise<Response> {
   console.log(
     `[webhook] stored event ${eventId} as vendor_event ${result.vendorEventId}, job ${result.jobId}`,
   );
+
+  // AFTER the transaction committed, never inside it. The work is durable at
+  // this point; this only shortens the wait from "next scheduled drain" to
+  // "seconds". Not awaited, and incapable of throwing — see lib/nudge.ts.
+  nudgeWorker("webhook");
+
   return Response.json(
     { received: true, duplicate: false, job_id: result.jobId },
     { status: 200 },

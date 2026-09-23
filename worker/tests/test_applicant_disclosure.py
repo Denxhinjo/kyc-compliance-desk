@@ -145,11 +145,21 @@ def flagged_application(web_service):
         with connection.cursor() as cur:
             cur.execute(
                 """
-                select application_id
-                  from audit_events
-                 where action = 'screening.completed'
-                   and details::text ilike '%sanctions match%'
-                 order by id desc
+                -- A screening match AND a full timeline. The counterweight
+                -- test asserts the applicant can still see their own history,
+                -- and an application assembled by hand in some other test has
+                -- a screening event but no 'application.created' — which made
+                -- this fixture pick it and the counterweight fail for a reason
+                -- that had nothing to do with disclosure.
+                select s.application_id
+                  from audit_events s
+                 where s.action = 'screening.completed'
+                   and s.details::text ilike '%sanctions match%'
+                   and exists (
+                       select 1 from audit_events c
+                        where c.application_id = s.application_id
+                          and c.action = 'application.created')
+                 order by s.id desc
                  limit 1
                 """
             )

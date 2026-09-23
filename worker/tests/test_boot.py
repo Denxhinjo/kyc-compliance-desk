@@ -89,16 +89,22 @@ def test_a_cold_load_after_boot_is_logged_loudly(monkeypatch, caplog):
     ), "a post-boot load must warn — it means a job is blocking on it"
 
 
-def test_the_screening_handler_still_works_from_a_cold_process(db, make_application):
-    """Preloading must not have broken the path it optimises.
+def test_the_screening_handler_screens_against_the_database(
+    db, make_application, monkeypatch
+):
+    """The handler reads the list from Postgres, not from this process.
 
-    A worker that preloads and then cannot screen would be a worse outcome than
-    the problem being fixed.
+    Once the list moved into the database there is nothing left to preload —
+    what has to be true is that a snapshot exists and is searchable. A worker
+    that boots clean and then cannot screen would be worse than one that
+    refuses to start.
     """
     import screening_handler
     from jobs import Job, enqueue_job
 
-    sources.preload("synthetic")
+    # The test database carries the committed synthetic fixture; .env may point
+    # a developer's machine at OFAC.
+    monkeypatch.setattr(screening_handler, "SANCTIONS_SOURCE", "synthetic")
     application_id = make_application("screening", full_name="Ahmed Hassan")
     job_id = enqueue_job(db, "screening.run", {"application_id": application_id})
     with db.cursor() as cur:

@@ -42,7 +42,25 @@ def enqueue(db, job_type: str, count: int = 1, payload: str = "{}") -> list[int]
     return ids
 
 
-def executed_job_ids(db, job_type: str) -> list[int]:
+def watermark(db) -> int:
+    """The audit log's high-water mark, so a count can be scoped to one test.
+
+    audit_events rejects DELETE, so a test cannot clear it and start fresh —
+    that rule binds the tests as much as anything else. Recording the last id
+    first and counting only above it is the alternative, and it makes each test
+    independent of everything that ran before it.
+
+    Learned the hard way: this file's 500-job test counted every demo.noop
+    execution ever recorded. It passed for months because it was the only thing
+    producing them, then test_drain.py arrived, ran eighty of its own first,
+    and the count came to 581.
+    """
+    with db.cursor() as cur:
+        cur.execute("select coalesce(max(id), 0) from audit_events")
+        return cur.fetchone()[0]
+
+
+def executed_job_ids(db, job_type: str, since: int = 0) -> list[int]:
     """Which jobs recorded that they ran, from the append-only audit log.
 
     Read from audit_events rather than from a counter the test keeps, because
@@ -56,8 +74,9 @@ def executed_job_ids(db, job_type: str) -> list[int]:
               from audit_events
              where action = 'job.executed'
                and details->>'job_type' = %s
+               and id > %s
             """,
-            (job_type,),
+            (job_type, since),
         )
         return [row[0] for row in cur.fetchall()]
 
@@ -105,6 +124,7 @@ def test_two_workers_never_process_a_job_twice(db, schema):
     # jobs other tests left behind and the arithmetic stops meaning anything.
     with db.cursor() as cur:
         cur.execute("delete from jobs where status = 'queued'")
+    mark = watermark(db)
     enqueue(db, job_type, 500)
 
     results: dict[str, int] = {}
@@ -119,7 +139,7 @@ def test_two_workers_never_process_a_job_twice(db, schema):
     for thread in threads:
         thread.join(timeout=180)
 
-    executed = executed_job_ids(db, job_type)
+    executed = executed_job_ids(db, job_type, since=mark)
 
     assert len(executed) == 500, "every job must run"
     assert len(set(executed)) == 500, (
@@ -139,7 +159,7 @@ def test_the_naive_claim_really_is_broken(db, schema):
     "fixing" the deliberately broken function.
     """
     job_type = "demo.noop"
-    before = len(executed_job_ids(db, job_type))
+    mark = watermark(db)
     enqueue(db, job_type, 60)
 
     threads = [
@@ -151,7 +171,7 @@ def test_the_naive_claim_really_is_broken(db, schema):
     for thread in threads:
         thread.join(timeout=120)
 
-    executed = executed_job_ids(db, job_type)[before:]
+    executed = executed_job_ids(db, job_type, since=mark)
     duplicates = len(executed) - len(set(executed))
     assert duplicates > 0, (
         "claim_job_naively processed nothing twice — the demonstration of the "
@@ -338,7 +358,7 @@ def test_marking_done_and_the_handlers_writes_commit_together(db):
     job = claim_job(db, "atomic-worker")
     assert job is not None
 
-    before = len(executed_job_ids(db, "demo.noop"))
+    mark = watermark(db)
 
     # psycopg.Rollback is caught by the transaction block — that is what it is
     # for — so it does not propagate and there is nothing to assert on it.
@@ -350,7 +370,7 @@ def test_marking_done_and_the_handlers_writes_commit_together(db):
     with db.cursor() as cur:
         cur.execute("select status from jobs where id = %s", (job_id,))
         assert cur.fetchone()[0] == "running", "the completion rolled back"
-    assert len(executed_job_ids(db, "demo.noop")) == before, (
+    assert len(executed_job_ids(db, "demo.noop", since=mark)) == 0, (
         "the audit row rolled back with it — if logEvent opened its own "
         "connection this row would have survived"
     )
