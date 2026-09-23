@@ -28,3 +28,5 @@ data/opensanctions.json
 Thumbs.db
 .vscode/
 .idea/
+.vercel
+.env*

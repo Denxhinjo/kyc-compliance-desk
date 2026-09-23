@@ -2,8 +2,19 @@
 #
 # Separate from worker/requirements.txt on purpose, and deliberately thinner:
 # the function does not run the test suite, so pytest is not here. Everything
-# else must match, because api/drain.py imports the worker package directly and
+# else MUST match, because api/drain.py imports the worker package directly and
 # a version skew between the two would be a bug that only appears in production.
-psycopg[binary]==3.2.3
+#
+# ON THE PSYCOPG VERSION. Vercel builds with the newest CPython it has, which
+# is currently 3.14.7, and psycopg-binary published no cp314 wheel until 3.2.10
+# — the first build failed with "no wheels with a matching Python ABI tag".
+#
+# A `.python-version` file pinning 3.12 was tried first and Vercel ignored it,
+# so it was removed rather than left behind looking like it did something.
+#
+# The fix is to move forward instead: 3.2.13 is the newest 3.2.x, has cp314
+# wheels, and is pinned identically in worker/requirements.txt so the function
+# and the worker cannot drift. The full test suite runs against it.
+psycopg[binary]==3.2.13
 python-dotenv==1.0.1
 rapidfuzz==3.14.6

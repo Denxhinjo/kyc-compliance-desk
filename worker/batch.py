@@ -50,7 +50,7 @@ import retention  # noqa: F401
 import screening_handler  # noqa: F401
 import sweeper  # noqa: F401
 from config import STALE_SECONDS
-from jobs import claim_job, queue_depth
+from jobs import claim_job
 from runner import run_job
 
 log = logging.getLogger("worker.drain")
@@ -118,8 +118,7 @@ def drain_once(
         claimed += 1
         run_job(conn, job)
 
-    depth = queue_depth(conn)
-    remaining = depth.get("queued", 0)
+    remaining = claimable_now(conn)
     elapsed_ms = int((time.monotonic() - started) * 1000)
 
     result = DrainResult(
@@ -135,6 +134,29 @@ def drain_once(
         claimed, reclaimed, remaining, elapsed_ms,
     )
     return result
+
+
+def claimable_now(conn: psycopg.Connection) -> int:
+    """Jobs that could be claimed RIGHT NOW, not every queued row.
+
+    `queue_depth` counts by status, which includes work deliberately scheduled
+    for later: the sweeper and the retention cleanup are always sitting in
+    'queued' with a `run_after` minutes or hours ahead.
+
+    Counting those made `more` permanently true, which is not a cosmetic
+    difference — the cron loop calls the endpoint again for as long as `more`
+    says there is work, so every scheduled run would make its full twelve calls
+    and claim nothing on eleven of them. Observed in production on the first
+    deploy: remaining sat at 2 forever with claimed at 0.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            select count(*) from jobs
+             where status = 'queued' and run_after <= now()
+            """
+        )
+        return cur.fetchone()[0]
 
 
 def reclaim_stale(conn: psycopg.Connection):
