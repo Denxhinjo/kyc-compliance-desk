@@ -320,25 +320,48 @@ CI runs both on every push, against a real `postgres:16`.
 
 ## Deploying
 
-Heroku, as containers: one app, a `web` and a `worker` process type, and a
-release phase that runs the migrations from the worker image. The full runbook —
-config vars and what each one is for, how to confirm the worker is *processing*
-and not merely *running*, measured memory and boot figures — is in
-[docs/deploy-heroku.md](docs/deploy-heroku.md).
+The live demo runs on free tiers: **Vercel** for the Next.js app, **Neon** for
+Postgres, and the worker as an **on-demand function** rather than a long-lived
+process.
 
-Two things there are worth knowing even if you never deploy it:
+That last part is a real architectural difference and worth stating plainly.
+Locally, and in the repository, the worker is `worker/main.py`: a loop that
+claims a job, runs it, sleeps, and repeats for as long as the process lives.
+That is the right shape for the job and it is what `docker compose up` gives
+you. It is also a process that has to be running somewhere all the time, and
+somewhere all the time costs money. I am not paying a monthly bill to host a
+portfolio demo, and that is a good enough reason.
 
-**The worker does not start by itself.** Heroku starts `web` and leaves every
-other process type at zero. Forget `heroku ps:scale worker=1` and you get a site
-that accepts applications and decides none of them — the most likely way this
-particular deploy goes wrong, and a silent one.
+So production has a second entry point. `POST /api/drain` claims a **bounded
+batch** — five jobs — runs them, and returns. It is called repeatedly instead
+of looping: once by the web app the moment work is enqueued, so an applicant
+sees a decision in seconds, and every five minutes by a GitHub Actions cron, so
+that the reaper and the sweeper still run and nothing is stranded if that first
+call is lost.
 
-**The sanctions list is downloaded at boot, not baked into the image.** OFAC's
-list is 5.7MB of data that goes stale, so it is gitignored and dockerignored and
-fetched when the worker starts. If that fetch fails, `SANCTIONS_FALLBACK` lets
-the worker run against the committed fixture rather than crash-loop — logged at
-ERROR, and recorded in `sanctions_snapshots`, so any case decided while degraded
-says so on its own page long after the logs have gone.
+**Same handlers, two runtimes.** `worker/runner.py` holds the part that must
+not differ — the transaction boundary, the retry accounting, what counts as a
+permanent failure — and both entry points import it. Jobs are still claimed one
+at a time with `FOR UPDATE SKIP LOCKED`; two concurrent drains behave exactly
+like two concurrent workers because they execute the identical statement. The
+500-job no-double-processing proof is run against both.
+
+Moving to a function forced one other change, and it improved the system: the
+sanctions list used to be held in memory, 86MB of it, loaded at boot. A
+function that must start, answer and exit cannot afford that. The list now
+lives in Postgres and is searched in two stages — a `pg_trgm` index narrows
+19,393 entries to about 27 candidates, then rapidfuzz scores those with exactly
+the code that ran before. An equivalence test compares both matchers over 400
+applicants and asserts identical matches, strengths and decisions; it found
+three real bugs while being written, which are written up in
+[docs/decisions.md](docs/decisions.md).
+
+None of this changes what the repository is. `docker compose up` still runs the
+long-lived worker, the test suite still exercises the full asynchronous
+pipeline — idempotency, out-of-order results, the sweeper, concurrent claims —
+and none of those tests care which entry point is in front of them.
+
+The full deployment runbook is in [docs/deploy.md](docs/deploy.md).
 
 ---
 

@@ -1,0 +1,9 @@
+# Dependencies for the Vercel Python function in api/.
+#
+# Separate from worker/requirements.txt on purpose, and deliberately thinner:
+# the function does not run the test suite, so pytest is not here. Everything
+# else must match, because api/drain.py imports the worker package directly and
+# a version skew between the two would be a bug that only appears in production.
+psycopg[binary]==3.2.3
+python-dotenv==1.0.1
+rapidfuzz==3.14.6

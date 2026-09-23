@@ -236,6 +236,34 @@ def make_application(db):
 
 
 @pytest.fixture
+def audit_watermark(db):
+    """The audit log's high-water mark, for scoping a count to one test.
+
+    THE RULE, because it has bitten once and the failure mode is quiet.
+
+    `jobs` can be deleted, so a test that needs a clean slate deletes first and
+    its counts mean what they say. `audit_events` CANNOT — it rejects DELETE by
+    design, and that rule binds the test suite too. So a test that counts audit
+    rows is counting every row every earlier test produced, and is correct only
+    for as long as it happens to be the only thing producing them.
+
+    The 500-job concurrency proof was written that way. It was right for
+    months, then test_drain.py arrived, ran eighty demo.noop jobs of its own
+    first, and the count came to 581. It failed loudly that time. It could just
+    as easily have drifted into passing for the wrong reason.
+
+    So: record this first, then count only `id > watermark`.
+    """
+
+    def _mark() -> int:
+        with db.cursor() as cur:
+            cur.execute("select coalesce(max(id), 0) from audit_events")
+            return cur.fetchone()[0]
+
+    return _mark
+
+
+@pytest.fixture
 def count_rows(db):
     """Count rows matching a condition, for before/after assertions."""
 

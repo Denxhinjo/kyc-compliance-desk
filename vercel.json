@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "echo 'nothing to build - this project is one Python function'",
+  "outputDirectory": ".",
+  "functions": {
+    "api/drain.py": {
+      "maxDuration": 60,
+      "memory": 512
+    }
+  }
+}

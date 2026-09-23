@@ -1,0 +1,12 @@
+# This project deploys ONE Python function. Everything the function does not
+# import is dead weight in the bundle and slows a cold start.
+web/
+docs/
+scripts/
+data/ofac_sdn.json
+data/opensanctions.json
+worker/.venv/
+worker/tests/
+**/__pycache__/
+**/node_modules/
+.git/

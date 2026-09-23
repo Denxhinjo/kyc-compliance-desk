@@ -1,0 +1,87 @@
+name: drain
+
+# The worker's heartbeat in production.
+#
+# There is no long-lived process on this deployment, so nothing would otherwise
+# run the two recurring jobs the system needs: the reaper, which rescues work
+# abandoned by a function that was killed mid-job, and the sweeper, which asks
+# the vendor about applications no webhook ever arrived for.
+#
+# Every five minutes is the floor GitHub allows for `schedule`, and it is also
+# about right: the nudge from the web app covers the latency-sensitive path, so
+# this only has to be frequent enough that nothing is stranded for long.
+#
+# On a public repository the minutes are free.
+
+on:
+  schedule:
+    # Five minutes is GitHub's minimum. Note that scheduled runs are queued on
+    # a best-effort basis and can be delayed by several minutes under load —
+    # fine here, because nothing depends on punctuality, only on eventually.
+    - cron: "*/5 * * * *"
+  # So it can be triggered by hand when demoing, without waiting for the clock.
+  workflow_dispatch:
+
+# A slow drain must not pile up behind itself. If a run is still going when the
+# next is due, skip rather than queue: the work is still in the queue and the
+# run after that will find it.
+concurrency:
+  group: drain
+  cancel-in-progress: false
+
+jobs:
+  drain:
+    name: work the queue
+    runs-on: ubuntu-latest
+    # Generous next to a 60s function, but this is the whole job including
+    # several calls. A hung request should fail the run, not occupy a runner.
+    timeout-minutes: 5
+
+    steps:
+      - name: Drain the queue
+        env:
+          DRAIN_URL: ${{ secrets.DRAIN_URL }}
+          DRAIN_SECRET: ${{ secrets.DRAIN_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DRAIN_URL}" ] || [ -z "${DRAIN_SECRET}" ]; then
+            echo "DRAIN_URL or DRAIN_SECRET is not set in repository secrets"
+            exit 1
+          fi
+
+          # Called repeatedly rather than once, because the endpoint claims a
+          # BOUNDED batch and returns — that is what keeps it inside the
+          # function's duration limit. `more` says whether to come back.
+          #
+          # Capped at 12 calls so a genuine backlog cannot turn a cron run into
+          # an unbounded loop. Whatever is left waits five minutes.
+          for attempt in $(seq 1 12); do
+            response=$(curl --silent --show-error --fail-with-body \
+              --max-time 70 \
+              --request POST \
+              --header "x-drain-secret: ${DRAIN_SECRET}" \
+              "${DRAIN_URL}")
+
+            echo "call ${attempt}: ${response}"
+
+            # No jq dependency: one grep on the flag the endpoint returns.
+            if ! echo "${response}" | grep -q '"more": *true'; then
+              echo "queue drained"
+              break
+            fi
+          done
+
+      - name: Explain a failure
+        if: failure()
+        run: |
+          echo "The drain did not complete."
+          echo
+          echo "Most likely, in order:"
+          echo "  1. DRAIN_SECRET in repository secrets no longer matches the"
+          echo "     DRAIN_SECRET environment variable on the function (401)."
+          echo "  2. The database is unreachable or out of free-tier quota."
+          echo "  3. A handler is raising. The function's own logs say which."
+          echo
+          echo "Nothing is lost either way: jobs stay queued and the next run"
+          echo "picks them up. This is a liveness failure, not a data one."
