@@ -3,7 +3,7 @@
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
-\usepackage[margin=2.4cm]{geometry}
+\usepackage[margin=2.4cm,bottom=2.0cm]{geometry}
 \usepackage{microtype}
 
 % Code fragments are rare and short. Where one appears, the code IS the
@@ -13,14 +13,14 @@
    \parskip=0pt\baselineskip=1.05\baselineskip\obeylines}%
   {\endgroup\par\vspace{0.5em}}
 
-\setlength{\parskip}{0.55em}
+\setlength{\parskip}{0.47em}
 \setlength{\parindent}{0pt}
 
 \usepackage{titlesec}
 \titleformat{\section}{\large\bfseries}{\thesection.}{0.6em}{}
-\titlespacing*{\section}{0pt}{1.4em}{0.5em}
+\titlespacing*{\section}{0pt}{1.15em}{0.45em}
 \titleformat{\subsection}{\normalsize\bfseries}{}{0em}{}
-\titlespacing*{\subsection}{0pt}{0.9em}{0.3em}
+\titlespacing*{\subsection}{0pt}{0.75em}{0.28em}
 
 \begin{document}
 
@@ -53,12 +53,11 @@ I applied one rule four times before I noticed I was doing it, so it is worth
 naming before the individual decisions: \textbf{prefer a visible failure to a
 silent degradation}.
 
-A sanctions screen that runs against half a list returns fewer matches and
-looks like a clean result. A disclosure filter that does not recognise an event
-type and shows it anyway leaks. A shared secret that is unset and therefore
-lets everyone through is worse than one that locks everyone out. In each case
-the failure that does not announce itself is the expensive one, because nobody
-goes looking for it.
+A sanctions screen that runs against half a list returns fewer matches and looks
+like a clean result. A disclosure filter that shows an event type it does not
+recognise leaks. A shared secret that is unset and therefore lets everyone
+through is worse than one that locks everyone out. The failure that does not
+announce itself is the expensive one, because nobody goes looking for it.
 
 So: the sanctions loader stamps ``loaded'' \emph{last}, and the matcher refuses
 a snapshot without that stamp, so a half-finished load is unusable rather than
@@ -75,12 +74,12 @@ one.
 
 \subsection{The problem}
 
-When a verification result arrives by webhook, I have to do two things: record
-that it arrived, and schedule the work it implies. If those two are not atomic,
-there is no ordering of them that is correct. Enqueue first and the database
-write can fail, leaving a job referring to a row that does not exist. Write
-first and the enqueue can fail, leaving a result nobody will ever process ---
-an applicant waiting forever with no error anywhere.
+When a verification result arrives by webhook I must do two things: record that
+it arrived, and schedule the work it implies. If they are not atomic, no ordering
+is correct. Enqueue first and the database write can fail, leaving a job that
+refers to a row which does not exist. Write first and the enqueue can fail,
+leaving a result nobody processes --- an applicant waiting forever, no error
+anywhere.
 
 \subsection{What I chose, and what I rejected}
 
@@ -88,14 +87,13 @@ The queue is an ordinary table in the same database as the business data, so
 enqueueing is part of the same transaction as the write that caused it. Either
 both happen or neither does. There is no window.
 
-I rejected Redis and Celery for exactly this. Both are better queues in
-isolation --- faster, with richer scheduling and visibility. Both are a
-\emph{second} system, which means a distributed transaction I would have to
-fake with an outbox pattern: write to Postgres, write a row saying ``I still
-need to tell Redis'', have something drain that row into Redis. At which point
-I have built a database-backed queue anyway, plus Redis, and the database-backed
-queue is the one carrying correctness. I would rather have the honest version
-of that than the version with a dependency in front of it.
+I rejected Redis and Celery for exactly this. Both are better queues in isolation
+--- faster, with richer scheduling and visibility --- and both are a \emph{second}
+system, which means a distributed transaction I would have to fake with an outbox
+pattern: write to Postgres, write a row saying ``I still need to tell Redis'',
+drain that row into Redis. At which point I have built a database-backed queue
+anyway, plus Redis, and the database-backed queue is the one carrying
+correctness. I would rather have that without the dependency in front of it.
 
 I rejected \texttt{pg-boss} for a different reason: it would have owned the
 schema. The database is shared by TypeScript and Python, and I did not want a
@@ -107,10 +105,10 @@ neither, keeps that boundary clean.
 
 At high throughput. Every claim is a write and a row-level lock; the table
 accumulates dead tuples and leans on autovacuum. Somewhere in the low thousands
-of jobs per second this becomes the bottleneck and a purpose-built broker
-becomes worth its operational cost. This system processes a few hundred
-applications a day. I am nowhere near that, and the honest version of this
-argument includes the point at which I would change my mind.
+of jobs per second this becomes the bottleneck and a purpose-built broker earns
+its operational cost. This system handles a few hundred applications a day --- I
+am nowhere near it, and the honest version of the argument names the point at
+which I would change my mind.
 
 \section{FOR UPDATE SKIP LOCKED}
 
@@ -140,16 +138,19 @@ it were not there, so the second worker takes the next one instead.
 
 I did not want to assert this, so I measured the counterfactual. There is a
 deliberately broken claim function in the codebase --- select, then update, with
-no lock --- kept so the comparison is reproducible rather than rhetorical. Two
-workers, 200 jobs, no lock: \textbf{380 executions of 200 jobs, 180 of them run
-twice}. Re-running it today gives 196 to 199 duplicates of 200; the exact number
-moves with machine speed, and that it moves is the point --- it is a race, not a
-constant. With the lock, across many runs, the duplicate count is zero.
+no lock --- kept so the comparison is reproducible rather than rhetorical.
 
-There is a test that asserts the broken version is \emph{still broken}. It looks
-absurd until you consider how it would fail: someone reads that function, sees a
-race condition, fixes it, and the comparison quietly becomes a claim about
-nothing.
+Five runs today, two workers against 200 jobs with no lock, gave 198, 183, 176,
+192 and 198 duplicates. The third, exactly: \textbf{376 executions of 200
+distinct jobs, 176 of them run twice}. That spread is wide and I would rather
+print it than narrow it --- the count swings by twenty between runs on one
+machine, because this is a race, and how often two workers land on the same row
+is scheduling luck. The same five runs \emph{with} the lock: 200 executions, 200
+distinct jobs, zero duplicates, five times out of five.
+
+A test asserts the broken version is \emph{still broken}. That looks absurd until
+you consider how it fails: someone reads the function, sees a race, fixes it, and
+the comparison quietly becomes a claim about nothing.
 
 \subsection{Attempts increments at claim time, not on failure}
 
@@ -269,17 +270,16 @@ OFAC SDN at 86\% name similarity''}.
 I originally shipped the applicant page rendering those rows directly. That was
 the most serious mistake in the project.
 
-Three reasons an applicant is not shown that, none of which needs a citation to
-stand up. First, tipping-off: financial-crime regimes generally restrict telling
-a customer what screening or reporting has happened about them, and rather than
-work out exactly where the line falls in each jurisdiction, the safe operating
-rule is that screening detail does not go to its subject --- then the legal
-question never has to be reached. Second, it teaches evasion: ``matched at 86\%,
-downgraded because the listed date of birth conflicts'' tells someone precisely
-which field to change. Third, and most often overlooked, \emph{most of these
-matches are wrong}: a name similarity is a finding about a name, not about a
-person, and showing it attaches a sanctioned individual's identity to an
-applicant who is, in the ordinary case, somebody else entirely.
+Three reasons an applicant is not shown that, none needing a citation to stand
+up. First, tipping-off: financial-crime regimes generally restrict telling a
+customer what screening has happened about them, and rather than work out where
+the line falls in each jurisdiction, the safe operating rule is that screening
+detail does not reach its subject --- then the legal question never arises.
+Second, it teaches evasion: ``matched at 86\%, downgraded because the listed date
+of birth conflicts'' tells someone exactly which field to change. Third, and most
+often overlooked, \emph{most of these matches are wrong}: a name similarity is a
+finding about a name, not a person, and showing it attaches a sanctioned
+individual's identity to an applicant who is, ordinarily, somebody else.
 
 On the law specifically: in the UK the nearest provision is the Proceeds of
 Crime Act 2002 s.333A, but it is narrower than the rule I apply --- it concerns
@@ -305,18 +305,18 @@ is trivially satisfied by a blank page.
 
 \section{Sanctions provenance: what the hash does and does not prove}
 
-A decision has two inputs: the rules, and the list. I versioned the rules early.
-The list carried no version at all, so the question an auditor actually asks ---
-\emph{``was this person screened against the list as it stood that day?''} ---
-was not hard to answer, it was unanswerable.
+A decision has two inputs: the rules and the list. I versioned the rules early;
+the list carried no version at all, so the question an auditor actually asks ---
+\emph{``was this person screened against the list as it stood that day?''} --- was
+not hard to answer, it was unanswerable.
 
 Now every screening result points at a snapshot row recording the source, the
-publisher's own publication date, the record count, a SHA-256 of the file, and
-when it was loaded. The chain runs decision → match → list version → digest.
+publisher's publication date, the record count, a SHA-256 of the file and when it
+was loaded. The chain runs decision → match → list version → digest.
 
-\textbf{Precisely what the hash proves:} that two screening runs recording the
-same digest used byte-identical content. That is useful --- it makes ``the same
-list'' checkable rather than assumed.
+\textbf{What the hash proves:} that two screening runs recording the same digest
+used byte-identical content, which makes ``the same list'' checkable rather than
+assumed.
 
 \textbf{What it does not prove.} The digest is of the JSON file my downloader
 writes, not of the XML the US Treasury published, so it attests to my
@@ -327,29 +327,39 @@ would be recorded faithfully as corrupt. The right guard is cross-checking
 against OFAC's own declared record count and the previous snapshot, which I have
 not built.
 
-Staleness is also unsolved. The list is loaded at deployment and nothing
-refreshes it. Recording the publication date makes that \emph{visible} --- an old
-date next to a recent decision is readable evidence --- and visible is a real
-improvement over invisible, but it is not the same as fixed.
+Staleness is also unsolved: the list is loaded at deployment and nothing refreshes
+it. Recording the publication date makes that \emph{visible} --- an old date next
+to a recent decision is readable evidence --- which is better than invisible, but
+not the same as fixed.
 
 \section{Two-stage matching, and one principle about pre-filters}
 
 Fuzzy name matching against 19{,}393 OFAC entries (44{,}017 searchable spellings
 once aliases are included) originally happened in memory: 86\,MB resident,
-scanned per applicant. That is fine for a process that runs for weeks and
+scanned per applicant. \textbf{Every one of those entries is loaded and
+searched}, vessels and companies as well as people. A subset of 7{,}429 --- the
+person-shaped names that also carry a date of birth --- appears only in the seed
+script, which draws synthetic applicant names from it so that some applicants
+deliberately resemble somebody listed. It narrows who gets \emph{invented},
+never what anybody is screened \emph{against}.
+That is fine for a process
 impossible for one that must start, answer and exit.
 
 So the list moved into Postgres and the search became two stages. A trigram GIN
 index over individual name \emph{tokens} narrows the list to a shortlist ---
-averaging 27 entries, 0.141\% of the list --- and then rapidfuzz scores that
+a median of 224 entries and a mean of 424, roughly 2\% of the list --- and then
 shortlist with exactly the code that ran before.
 
 I indexed tokens rather than whole names, and that was the real decision.
-Measured against pairs the matcher \emph{accepts}, whole-string trigram
-similarity falls as low as 0.471 (\texttt{ahmed hassan} against \texttt{ahmad
-hasan}), because transliteration drift lives inside words and an extra middle
-name wrecks a whole-string comparison while leaving every other token identical.
-Per-token similarity for the same pairs stays at 0.556 and above.
+Across the 131 matches the scorer accepts for 400 applicants, whole-string
+trigram similarity falls as low as 0.194; even a pair as recognisable as
+\texttt{ahmed hassan} against \texttt{ahmad hasan} scores only 0.471. The reason
+is that transliteration drift lives inside words, and one extra middle name
+wrecks a whole-string comparison while leaving every other token identical. The
+best-matching \emph{token} in those same 131 pairs never falls below 0.357, and
+its median is 1.000 --- the name part that matches usually matches exactly. A
+whole-string pre-filter at 0.25 would drop one of the 131; the per-token
+shortlist at the same 0.25 drops none.
 
 \subsection{The principle}
 
@@ -358,7 +368,7 @@ the Python rule that two name parts must correspond. It looked right and was
 wrong, because it applied that rule using a \emph{different similarity metric}
 from the one the scorer uses, and the two disagree badly on short tokens and
 substrings: \texttt{chen}/\texttt{jicheng} scores 72.7 on the scorer's metric
-(accepted) and 0.22 on trigram similarity (rejected).
+(accepted) and 0.182 on trigram similarity (rejected).
 
 Thirteen applicants out of 400 lost a real match. Every one was a miss, never a
 false positive --- which is the dangerous direction.
@@ -371,9 +381,27 @@ every actual decision to the scorer.
 
 The threshold was then set by measurement rather than taste: 0.35 lost 13
 applicants' matches, 0.30 lost one, 0.25 loses none. I chose 0.25 because recall
-is worth more than shortlist size here --- a larger shortlist costs microseconds
-of Python, and a shortlist missing the one true match costs a sanctioned person
-an account.
+is worth more than shortlist size here --- a shortlist missing the one true
+match costs a sanctioned person an account. That choice is not free, and the
+cost lands on the tail.
+
+\subsection{What it costs}
+
+Faster for almost everyone, slower for the worst case. Over 300 applicants on
+one machine, by shortlist size --- 10--49 entries: 190\,ms in memory against
+13\,ms two-stage; 50--199: 204 against 27; 200--999: 212 against 65; 1{,}000 and
+over: 228 against 177. Worst observed, 457\,ms against 623.
+
+The in-memory scan is flat by construction, 190 to 228\,ms, because it compares
+against all 19{,}393 entries whatever the name. Two-stage spans 13 to 623\,ms, a
+48$\times$ spread, because its cost is set by how many entries the pre-filter
+admits: a common surname on a list full of similar spellings produced a
+4{,}608-entry shortlist and a slower answer than scanning everything. So ---
+typically three to eight times faster, occasionally worse, and \emph{less
+predictable}. I took that trade because the alternative was never a fast
+in-memory scan, it was a function that could not hold the list at all. But a
+latency budget here would have to be written against the tail, and the tail is
+the number that moves.
 
 \section{Differential testing, and the bug that was already shipping}
 
@@ -405,10 +433,10 @@ build the thing that would tell me.
 
 \section{When one service may call another}
 
-The two services communicate only through the database. That rule exists to
-avoid an internal API --- one service asking the other to do something and
-waiting to hear how it went, which drags CORS, shared auth, retries and a second
-failure mode into a design that had none.
+The two services communicate only through the database. That rule exists to avoid
+an internal API --- one service asking the other to do something and waiting to
+hear how it went, which drags CORS, shared auth, retries and a second failure
+mode into a design that had none.
 
 The deployed version bends it: after enqueueing work, the web application sends
 an HTTP request to the worker so an applicant sees a decision in seconds rather
@@ -426,44 +454,41 @@ Which reduces to one sentence: \textbf{delete the call and the system is still
 correct, only slower}. The queue still carries all the meaning; the HTTP request
 carries only timing.
 
-That test then proved itself in an unplanned way. The call silently did nothing
-for a period after deployment --- and nothing broke. Applications were still
-decided, by the scheduled path, a few minutes later instead of a few seconds.
-The failure was a latency regression rather than a correctness one, which is
-exactly what the design predicted.
+The test then proved itself unplanned: the call silently did nothing for a period
+after deployment, and nothing broke. Applications were still decided by the
+scheduled path, minutes later instead of seconds --- a latency regression rather
+than a correctness one, exactly as the design predicted.
 
 \section{The worker as an on-demand function}
 
 Locally the worker is a long-lived loop: claim, run, sleep, repeat. That is the
-right shape and it is what \texttt{docker compose up} gives you. It is also a
+right shape, and it is what \texttt{docker compose up} gives you. It is also a
 process that must run somewhere permanently, and permanently costs money. I am
-not paying a monthly bill to host a portfolio demo, and I think that is a
-sufficient reason.
+not paying a monthly bill to host a portfolio demo.
 
 So production has a second entry point: an HTTP endpoint that claims a
 \emph{bounded} batch --- five jobs --- runs them and returns. Bounded because a
-function has a wall-clock limit; a loop that ran until the queue emptied would be
-killed mid-job on every invocation once a backlog existed, making no progress
-while looking busy. It is called repeatedly instead: once by the web app when
-work is enqueued, and every five minutes by a scheduler, which is also what runs
-the two recurring jobs a long-lived process would have run on a timer.
+function has a wall-clock limit, and a loop running until the queue emptied would
+be killed mid-job on every invocation once a backlog existed, making no progress
+while looking busy. It is called repeatedly instead: by the web app when work is
+enqueued, and every five minutes by a scheduler that also runs the recurring
+jobs.
 
-The part I care about is that the queue's guarantees are untouched. Both entry
+The queue's guarantees are untouched, which is the part I care about. Both entry
 points import the same function to execute a job, so the transaction boundary and
-the retry accounting cannot diverge. Jobs are still claimed one at a time with
+the retry accounting cannot diverge; jobs are still claimed one at a time with
 the same statement, and the 500-job no-double-processing proof runs against both.
-Same logic, two runtimes --- which is the honest description, rather than
-pretending the deployed thing is the same thing.
+Same logic, two runtimes --- rather than pretending the deployed thing is the
+same thing.
 
 \textbf{The cost:} an applicant arriving when the database has been idle waits
-about 2.4 seconds for the first page that queries it, and roughly 0.3 seconds for
-every page after. In practice the five-minute schedule keeps the database awake,
-so this is only paid if the schedule has stopped.
+about 2.4 seconds for the first page that queries it, then roughly 0.3 for every
+page after. The five-minute schedule keeps the database awake, so this is paid
+only if the schedule has stopped.
 
-\vfill
+\vspace{0.5em}
 \rule{\textwidth}{0.4pt}
-{\footnotesize Synthetic data throughout. No real person's data has been in this
-system. Figures in this document were measured, not estimated; where a number
-moves between runs I have said so.}
+{\footnotesize Synthetic data throughout; no real person's data has been in this
+system. Every figure was measured, not estimated; where one moves, I say so.}
 
 \end{document}

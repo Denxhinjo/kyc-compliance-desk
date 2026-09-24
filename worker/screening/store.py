@@ -131,9 +131,9 @@ def active_snapshot(conn: psycopg.Connection, source: str) -> StoredList | None:
 #: that rule using a DIFFERENT similarity metric from the one stage 2 uses, and
 #: the two disagree badly on short tokens and substrings:
 #:
-#:     chen / jicheng     fuzz.ratio 72.7 (aligned)   trigram 0.22
-#:     mei / limei        fuzz.ratio 75.0 (aligned)   trigram 0.33
-#:     khalil / khani     fuzz.ratio 72.7 (aligned)   trigram 0.22
+#:     chen / jicheng     fuzz.ratio 72.7 (aligned)   trigram 0.182
+#:     mei / limei        fuzz.ratio 75.0 (aligned)   trigram 0.250
+#:     khalil / khani     fuzz.ratio 72.7 (aligned)   trigram 0.300
 #:
 #: So stage 1 was rejecting entries that stage 2 would have accepted — 13 of
 #: 400 applicants lost a real match. The equivalence test caught every one.

@@ -2461,9 +2461,9 @@ the two disagree badly on short tokens and substrings:
 
 | | `fuzz.ratio` (stage 2, accepts >= 70) | trigram (stage 1, accepted >= 0.35) |
 | --- | --- | --- |
-| chen / jicheng | 72.7 accept | 0.22 reject |
-| mei / limei | 75.0 accept | 0.33 reject |
-| khalil / khani | 72.7 accept | 0.22 reject |
+| chen / jicheng | 72.7 accept | 0.182 reject |
+| mei / limei | 75.0 accept | 0.250 reject |
+| khalil / khani | 72.7 accept | 0.300 reject |
 
 The lesson generalises well past this file: **a cheap pre-filter must only ever
 widen.** The moment it reimplements the expensive filter's judgement with a
