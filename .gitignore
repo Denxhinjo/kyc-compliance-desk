@@ -36,3 +36,6 @@ docs/*.aux
 docs/*.log
 docs/*.out
 docs/*.toc
+
+# Personal working notes, kept out of the repo.
+.project-notes.local.md

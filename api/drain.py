@@ -8,7 +8,8 @@ never have two versions.
 
 ON ARCHITECTURE RULE 1
 
-CLAUDE.md says the two services never call each other, no HTTP between them.
+ARCHITECTURE.md says the two services never call each other, no HTTP between
+them.
 That rule is now bent, deliberately, and it is worth being straight about which
 part survives.
 

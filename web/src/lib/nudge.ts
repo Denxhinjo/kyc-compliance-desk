@@ -3,8 +3,8 @@
  *
  * WHY THIS IS NOT AN INTERNAL API
  *
- * CLAUDE.md's first architecture rule is that the two services never call each
- * other. This bends it, and the part that survives is the important part.
+ * ARCHITECTURE.md's first architecture rule is that the two services never call
+ * each other. This bends it, and the part that survives is the important part.
  *
  * The rule exists to prevent an internal API: the web app asking the worker to
  * do something and waiting to hear how it went, which drags CORS, shared auth,
