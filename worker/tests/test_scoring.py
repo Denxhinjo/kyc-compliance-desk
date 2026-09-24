@@ -197,9 +197,12 @@ def test_call_for_action_countries(country):
     assert assessment.routing == Routing.REVIEW
 
 
-@pytest.mark.parametrize("country", ["NG", "SY", "VN"])
+# Derived from the list, not hardcoded. This used to name NG, SY and VN;
+# Nigeria left the grey list at a later plenary and the test failed for a
+# reason that had nothing to do with scoring. Parametrising over the set
+# means the next plenary updates the test with the data.
+@pytest.mark.parametrize("country", sorted(FATF_INCREASED_MONITORING))
 def test_increased_monitoring_countries(country):
-    assert country in FATF_INCREASED_MONITORING
     assessment = score_application(profile(country=country))
     assert assessment.score == 15
     # Elevated, but not on its own enough to trouble a human.
@@ -329,7 +332,10 @@ def test_thresholds_are_injectable_not_global():
 def test_a_score_of_exactly_nineteen_is_reachable_and_approves():
     """19/20 with real signals, not just arithmetic on the routing function."""
     assessment = score_application(
-        profile(country="NG", hits=(hit("adverse_media", 90.0),))
+        profile(
+            country=sorted(FATF_INCREASED_MONITORING)[0],
+            hits=(hit("adverse_media", 90.0),),
+        )
     )
     assert assessment.score == 25  # 15 country + 10 adverse media
     assert assessment.routing == Routing.REVIEW
@@ -386,7 +392,9 @@ def test_scoring_is_deterministic():
 def test_the_stored_form_carries_the_thresholds_and_the_ruleset_version():
     """Without these, a stored 65 becomes unexplainable the moment the bands
     move — you would know the number and the reasons but no longer the routing."""
-    stored = score_application(profile(country="NG")).as_dict()
+    stored = score_application(
+        profile(country=sorted(FATF_INCREASED_MONITORING)[0])
+    ).as_dict()
     assert stored["thresholds"] == {
         "auto_approve_below": 20,
         "auto_reject_at_or_above": 80,

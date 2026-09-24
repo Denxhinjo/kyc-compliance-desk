@@ -53,9 +53,22 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-#: Bumped whenever the points, bands or signals change. Stored on every scored
-#: application so an old score can be reproduced rather than merely believed.
-RULESET_VERSION = "2026-09-1"
+#: Bumped whenever the points, bands or signals change -- and when the
+#: reference data they read changes materially, which is why this moved to
+#: -2 on 2026-09-24.
+#:
+#: Stored on every scored application so an old score can be reproduced rather
+#: than merely believed. The points and bands did NOT change at -2; the
+#: increased-monitoring list was replaced wholesale, and 767 decisions already
+#: on disk carry -1 with no country_list recorded at all. Leaving the version
+#: alone would have meant two decisions stamped -1 having been scored against
+#: two different country lists, with nothing on the older ones to tell them
+#: apart. The version is the pin a compliance officer relies on to defend a
+#: past decision; an ambiguous pin is not a pin.
+#:
+#: -1 remains resolvable. Nothing rewrites those rows: they say -1, they were
+#: scored against the -1 list, and that statement stays true.
+RULESET_VERSION = "2026-09-2"
 
 
 # ---------------------------------------------------------------------------
@@ -140,92 +153,199 @@ class Routing:
 
 
 @dataclass(frozen=True)
-class CountryListing:
-    """The FATF country lists, carrying the provenance of the lists themselves.
+class ListRevision:
+    """One FATF list, as published at one plenary.
 
-    WHY THIS IS NOT IN POSTGRES WHEN THE SANCTIONS LIST IS
+    WHY A REVISION AND NOT JUST A SET OF CODES
 
-    The sanctions list moved into Postgres because of size and search: 19,393
-    entries needing a trigram index. Provenance rode along in that change but
-    was not what drove it. Twenty-four country codes have neither problem, so
-    storing them the same way would be copying the mechanism rather than the
-    reason. A change to a legal list should be a reviewable commit, and a diff
-    is a better audit artefact than an UPDATE nobody sees.
+    FATF publishes each list as a COMPLETE SET at each plenary, roughly three
+    times a year. It is not amended incrementally: a country's presence and
+    its absence are both statements as of one plenary date. So the set has
+    exactly one valid shape — every code from the SAME plenary, and the date
+    beside it that plenary's own.
 
-    What the sanctions side had and this did not is the provenance itself —
-    which revision these codes came from. That is what this type adds, along
-    with a refusal to invent the answer when it cannot be established.
+    Mixing plenaries produces a list wrong in both directions at once: it
+    screens against countries already cleared and misses countries added
+    since. That is worse than being out of date, because out of date is at
+    least a coherent statement about a known moment. This type exists so that
+    the codes and the date they belong to cannot drift apart.
     """
 
-    call_for_action: frozenset[str]
-    increased_monitoring: frozenset[str]
+    codes: frozenset[str]
+
+    #: code -> the jurisdiction's name AS PRINTED in the statement.
+    #:
+    #: Carried so the codes have something sourced to be checked against.
+    #: Python has no ISO-3166 table and pycountry is a dependency this project
+    #: has not taken, so without this a test could only check that a code is
+    #: two letters — which passes "UK" (not ISO; Great Britain is GB) and any
+    #: other plausible typo. Every name here was read off the same statement
+    #: as the code beside it, so the pair is evidence rather than recall.
+    names: Mapping[str, str]
+
     source_url: str
 
-    #: FATF's own publication date for this revision, ISO-8601 — or None when
-    #: the codes cannot be traced to a single published revision.
-    #:
-    #: Never a date chosen because it looks plausible. The synthetic sanctions
-    #: fixture leaves published_at null for exactly this reason: a manufactured
-    #: date is worse than an absent one, because it claims an authority it does
-    #: not have and survives review precisely by looking right.
+    #: The plenary's own publication date, ISO-8601 — or None when this
+    #: revision could not be sourced. Never a date picked because it looks
+    #: plausible: a manufactured date claims an authority it does not have and
+    #: survives review precisely by looking right.
     published_at: str | None
 
-    #: Why published_at is what it is. Recorded on every decision beside it, so
-    #: the limitation travels with the score instead of living in a comment
-    #: nobody reads at the moment of doubt.
+    #: When the codes were taken from source_url. Distinct from published_at:
+    #: a list published in June and read in September is current, and the gap
+    #: between the two is how stale it might be.
+    retrieved_at: str | None
+
+    #: Human-readable plenary, for the officer reading a case rather than a
+    #: machine reading a column.
+    plenary: str | None
+
     provenance: str
 
     @property
     def digest(self) -> str:
-        """A hash of the codes, so an edit cannot pass unnoticed.
-
-        test_country_lists.py pins this value. Changing either set without
-        updating published_at and the pinned digest fails that test, which is
-        the whole mechanism: the lists are allowed to change, but not quietly,
-        and not without restating where the new ones came from.
-        """
-        payload = "|".join(
-            (
-                ",".join(sorted(self.call_for_action)),
-                ",".join(sorted(self.increased_monitoring)),
-            )
-        )
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        """A hash of the codes, so an edit cannot pass unnoticed."""
+        return hashlib.sha256(
+            ",".join(sorted(self.codes)).encode("utf-8")
+        ).hexdigest()
 
     def as_dict(self) -> dict[str, Any]:
-        """What gets stored on a decision."""
         return {
             "source_url": self.source_url,
             "published_at": self.published_at,
+            "retrieved_at": self.retrieved_at,
+            "plenary": self.plenary,
             "provenance": self.provenance,
             "digest": self.digest,
         }
 
 
-COUNTRY_LISTING = CountryListing(
-    call_for_action=frozenset({"IR", "KP", "MM"}),
-    increased_monitoring=frozenset(
-        {"BF", "CM", "HR", "CD", "HT", "ML", "MZ", "MC", "NA", "NG",
-         "PH", "SN", "ZA", "SS", "SY", "TZ", "TR", "UG", "AE", "VN", "YE"}
+#: Read off the per-country section headings of the 19 June 2026 statement.
+_MONITORING_NAMES = {
+    "AO": "Angola",
+    "BA": "Bosnia and Herzegovina",
+    "BG": "Bulgaria",
+    "BO": "Bolivia",
+    "CD": "Democratic Republic of the Congo",
+    "CI": "Cote d'Ivoire",
+    "CM": "Cameroon",
+    "HT": "Haiti",
+    "IQ": "Iraq",
+    "KE": "Kenya",
+    "KW": "Kuwait",
+    "LA": "Lao PDR",
+    "LB": "Lebanon",
+    "MC": "Monaco",
+    "NP": "Nepal",
+    "PG": "Papua New Guinea",
+    "SS": "South Sudan",
+    "SY": "Syria",
+    "VE": "Venezuela",
+    "VG": "Virgin Islands (UK)",
+    "VN": "Vietnam",
+    "YE": "Yemen",
+}
+
+_CALL_FOR_ACTION_NAMES = {
+    "IR": "Iran",
+    "KP": "Democratic People's Republic of Korea",
+    "MM": "Myanmar",
+}
+
+#: The complete set from ONE statement: "Jurisdictions under Increased
+#: Monitoring", Paris, 19 June 2026. Twenty-two jurisdictions, taken from the
+#: per-country sections above the "Jurisdictions No Longer subject to Increased
+#: Monitoring" heading — Algeria and Namibia sit below it and are therefore
+#: removals, not members.
+#:
+#: Replaced WHOLESALE at the next plenary. Never amended country by country:
+#: see ListRevision for why a half-updated set is worse than an old one.
+INCREASED_MONITORING = ListRevision(
+    codes=frozenset(_MONITORING_NAMES),
+    names=_MONITORING_NAMES,
+    source_url=(
+        "https://www.fatf-gafi.org/content/fatf-gafi/en/publications/"
+        "High-risk-and-other-monitored-jurisdictions/"
+        "increased-monitoring-june-2026.html"
     ),
+    published_at="2026-06-19",
+    retrieved_at="2026-09-24",
+    plenary="June 2026",
+    provenance=(
+        "Complete set from the FATF statement 'Jurisdictions under Increased "
+        "Monitoring', Paris, 19 June 2026, retrieved from source_url on "
+        "2026-09-24. All 22 codes come from that one statement; none is "
+        "carried over from an earlier one."
+    ),
+)
+
+#: Iran and the DPRK carry counter-measures; Myanmar carries enhanced due
+#: diligence. Stable since Myanmar was added in October 2022.
+#:
+#: published_at is null and the codes are deliberately NOT re-fetched. The
+#: call-for-action statement was unreachable (HTTP 403 on every URL form) when
+#: the monitoring list was corrected on 2026-09-24, so no plenary date is
+#: asserted for these three. The codes are believed current; that belief is
+#: not a citation, and the data says so rather than borrowing the monitoring
+#: list's date to look sourced.
+CALL_FOR_ACTION = ListRevision(
+    codes=frozenset(_CALL_FOR_ACTION_NAMES),
+    names=_CALL_FOR_ACTION_NAMES,
     source_url=(
         "https://www.fatf-gafi.org/en/topics/"
         "high-risk-and-other-monitored-jurisdictions.html"
     ),
     published_at=None,
+    retrieved_at=None,
+    plenary=None,
     provenance=(
-        "UNSOURCED. These codes are demo data and do not transcribe any FATF "
-        "revision. They cannot: the increased-monitoring set holds Monaco, "
-        "grey-listed at the June 2024 plenary, beside Turkiye and the United "
-        "Arab Emirates, de-listed at that same plenary and in February 2024 "
-        "respectively — a combination FATF never published. The call-for-action "
-        "set (IR, KP, MM) does match the real one, which has been those three "
-        "since Myanmar was added in October 2022. Rather than assign a "
-        "publication date that would make the whole thing look sourced, "
-        "published_at is null. Before any real use: replace both sets from "
-        "source_url and set published_at to that plenary's own date."
+        "UNSOURCED. Not re-fetched during the 2026-09-24 correction: the FATF "
+        "call-for-action statement returned HTTP 403. IR, KP and MM have been "
+        "the set since Myanmar was added at the October 2022 plenary, but no "
+        "publication date is claimed for them here. To close this, fetch the "
+        "current statement and set published_at to its plenary date."
     ),
 )
+
+
+@dataclass(frozen=True)
+class CountryListing:
+    """Both FATF lists, each carrying its own revision.
+
+    Separate revisions rather than one shared date, because the two were
+    sourced at different times and a single published_at would silently
+    extend the monitoring list's citation over codes nobody verified.
+
+    WHY THIS IS NOT IN POSTGRES WHEN THE SANCTIONS LIST IS
+
+    The sanctions list moved into Postgres for size and search: 19,393 entries
+    needing a trigram index. Provenance rode along in that change but did not
+    drive it. Twenty-five country codes have neither problem, so storing them
+    the same way would copy the mechanism rather than the reason. A change to
+    a legal list should be a reviewable commit, and a diff is a better audit
+    artefact than an UPDATE nobody sees.
+    """
+
+    call_for_action_revision: ListRevision = CALL_FOR_ACTION
+    increased_monitoring_revision: ListRevision = INCREASED_MONITORING
+
+    @property
+    def call_for_action(self) -> frozenset[str]:
+        return self.call_for_action_revision.codes
+
+    @property
+    def increased_monitoring(self) -> frozenset[str]:
+        return self.increased_monitoring_revision.codes
+
+    def as_dict(self) -> dict[str, Any]:
+        """What gets stored on a decision."""
+        return {
+            "call_for_action": self.call_for_action_revision.as_dict(),
+            "increased_monitoring": self.increased_monitoring_revision.as_dict(),
+        }
+
+
+COUNTRY_LISTING = CountryListing()
 
 #: Kept as module-level names because they read better at the point of use and
 #: because the scoring tests import them directly.

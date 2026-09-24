@@ -652,8 +652,17 @@ approach, not a system that should go near a real customer. Specifically:
 
 - The points and thresholds are **defensible, not validated**. Nobody has
   back-tested them against real outcomes, because no real outcomes exist.
-- **FATF country lists are hardcoded with an "as at" date** and will be stale.
-  They are a legal list with a publication date, not a constant.
+- **The FATF increased-monitoring list is sourced but will go stale.** It is
+  the complete set from the statement of 19 June 2026, retrieved 24 September
+  2026, and it carries that date on every decision scored against it. FATF
+  revises the list roughly three times a year, so it needs replacing after each
+  plenary -- wholesale, never country by country, because a set assembled from
+  two plenaries screens against countries already cleared and misses countries
+  added since. Nothing here fetches it automatically.
+- **The call-for-action list (Iran, DPRK, Myanmar) carries no publication
+  date.** It was not re-fetched when the monitoring list was corrected, because
+  the FATF statement returned HTTP 403, so the data records it as unsourced
+  rather than borrowing the monitoring list's date.
 - No segmentation by product, channel or transaction behaviour — all of which a
   real risk model uses.
 

@@ -2695,3 +2695,113 @@ The lesson is about the cost of two projects in one repository, which was the
 right call for a different reason: they do not merely deploy separately, they
 can actively break each other, because config at the root is not namespaced to
 whoever wrote it.
+
+## The FATF country list was fabricated, and how that was possible
+
+The risk score adds points for the applicant's country: 40 for a jurisdiction
+subject to a FATF **call for action**, 15 for one under **increased
+monitoring**. Both lists lived in the code as hand-typed sets of ISO country
+codes with a comment above them reading `as at 2026-09`.
+
+Checking them against the source, the monitoring set turned out to be one FATF
+has never published. It contained **Monaco**, grey-listed at the June 2024
+plenary, sitting beside **Türkiye** and the **United Arab Emirates** — de-listed
+at that same plenary and in February 2024 respectively. Those three were never
+on the list at the same moment. The set was not out of date; it was an
+assembly of several different moments, which is a different and worse thing.
+
+### Why this could happen, and why nothing caught it
+
+The sanctions list is versioned meticulously: source, publisher's publication
+date, record count, SHA-256, load timestamp, and every screening result points
+at the snapshot it used. The country lists had a comment.
+
+That asymmetry was not itself the error — 25 country codes do not need a
+trigram index, and the argument for keeping them in code is sound (below). The
+error was that the *provenance* was prose. Nothing recorded which plenary the
+codes were meant to have come from, so nothing could notice that they had come
+from three.
+
+### The rule, which is the part worth remembering
+
+**FATF publishes each list as a complete set at each plenary**, roughly three
+times a year — February, June, October. It is not a list you amend
+incrementally. A jurisdiction's presence and its absence are *both* statements
+as of one date.
+
+So the set has exactly one valid shape: every code from the **same** plenary,
+and the date stored beside it **that** plenary's date. A set mixing plenaries
+is wrong in both directions at once — it screens people against countries that
+were already cleared, and misses countries added since. That is worse than
+being out of date, because being out of date is at least a coherent statement
+about a known moment.
+
+**The list is therefore replaced wholesale at each plenary, never amended
+country by country.**
+
+### What it is now
+
+The complete set from *Jurisdictions under Increased Monitoring*, Paris,
+**19 June 2026**, retrieved 24 September 2026 — 22 jurisdictions. Taken from
+the per-country sections above the heading "Jurisdictions No Longer subject to
+Increased Monitoring"; Algeria and Namibia sit below it and are removals, not
+members. That distinction is the one a careless read gets wrong.
+
+Against the fabricated set: **13 removed** (Burkina Faso, Croatia, Mali,
+Mozambique, Namibia, Nigeria, Philippines, Senegal, South Africa, Tanzania,
+Türkiye, Uganda, UAE), **14 added** (Angola, Bosnia and Herzegovina, Bulgaria,
+Bolivia, Côte d'Ivoire, Iraq, Kenya, Kuwait, Lao PDR, Lebanon, Nepal, Papua
+New Guinea, Venezuela, Virgin Islands (UK)), **8 unchanged**. Thirteen
+countries were being flagged that should not have been; fourteen were being
+missed.
+
+**The call-for-action list was deliberately not touched.** Iran, the DPRK and
+Myanmar are correct and have been since Myanmar was added in October 2022. But
+its statement returned HTTP 403 when the monitoring list was corrected, so it
+carries a null publication date and says `UNSOURCED` in the data rather than
+borrowing the monitoring list's date to look sourced. The two lists now carry
+**separate** revisions for exactly this reason: one shared date would have
+quietly extended a citation over codes nobody verified.
+
+### Why they stay in code rather than moving to Postgres
+
+The sanctions list moved into Postgres for **size and search** — 19,393 entries
+needing a trigram index. Provenance rode along in that change but was not what
+drove it. Twenty-five country codes have neither problem, so copying that
+storage decision would be copying the mechanism rather than the reason.
+
+A change to a legal list should be a reviewable commit. A diff showing thirteen
+countries leaving and fourteen arriving is a better audit artefact than an
+`UPDATE` nobody sees.
+
+### What stops it recurring
+
+The codes and their plenary date are pinned **as a pair** in
+`test_country_lists.py`. Editing the set changes the digest and fails the test,
+and the only way to make it pass is to come back and state which plenary the
+new codes are from. **An undated edit cannot be committed** — which is exactly
+the defect that produced the fabricated list.
+
+The other tests enforce that the date is a real ISO date and not a placeholder,
+that `retrieved_at` is not before `published_at`, that the two lists are
+disjoint, that every code is a well-formed alpha-2 carrying a jurisdiction name
+read off the same statement, and that the provenance reaches the stored
+decision. There is deliberately no test asserting the list has N entries: that
+asserts nothing about correctness and would break at the next plenary for no
+reason.
+
+### The ruleset version moved, and why that is not a policy change
+
+`RULESET_VERSION` went from `2026-09-1` to `2026-09-2`. The points and
+thresholds did not change — increased monitoring is still 15.
+
+The reason is the audit story. 767 decisions already on disk carry `2026-09-1`
+and no country-list provenance at all, because they predate it. Had the version
+stayed put, decisions stamped `2026-09-1` would have been scored against two
+different country lists with nothing on the older ones to tell them apart. The
+version is the pin a compliance officer relies on to defend a past decision,
+and an ambiguous pin is not a pin.
+
+Nothing rewrote those rows. They still read `2026-09-1`, they were scored
+against the `2026-09-1` list, and that statement remains true — which is the
+whole point of pinning rather than backfilling.

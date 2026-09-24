@@ -3,7 +3,7 @@
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
-\usepackage[margin=2.4cm,bottom=1.7cm]{geometry}
+\usepackage[margin=2.4cm,bottom=1.5cm]{geometry}
 \usepackage{microtype}
 
 % Document properties, so the file identifies its author when opened or
@@ -23,12 +23,12 @@
    \parskip=0pt\baselineskip=1.05\baselineskip\obeylines}%
   {\endgroup\par\vspace{0.5em}}
 
-\setlength{\parskip}{0.47em}
+\setlength{\parskip}{0.43em}
 \setlength{\parindent}{0pt}
 
 \usepackage{titlesec}
 \titleformat{\section}{\large\bfseries}{\thesection.}{0.6em}{}
-\titlespacing*{\section}{0pt}{1.15em}{0.45em}
+\titlespacing*{\section}{0pt}{0.95em}{0.4em}
 \titleformat{\subsection}{\normalsize\bfseries}{}{0em}{}
 \titlespacing*{\subsection}{0pt}{0.75em}{0.28em}
 
@@ -244,21 +244,31 @@ to a call for action 40, a failed document check 40. Under 20 auto-approves,
 20--79 goes to a human, 80 and over auto-rejects.
 
 The argument is not that a model would be less accurate. It is that when a
-regulator, an ombudsman, or the customer asks why this person was refused, the
+regulator, an ombudsman or the customer asks why this person was refused, the
 answer has to be a sentence. ``Sanctions match at 100\% name similarity,
 downgraded to probable because the listed date of birth conflicts, plus a
-declined document check'' is a sentence. ``The model scored 0.83'' is not, and
-neither is a SHAP plot.
+declined document check'' is one. ``The model scored 0.83'' is not, and neither
+is a SHAP plot.
 
-Two consequences I chose deliberately. PEP matches cannot on their own reach the
-rejection threshold, because being a politically exposed person is not illegal
-and wholesale refusal --- de-risking --- is something regulators criticise; the
-law asks for enhanced due diligence, which means a human. And a sanctions match
-alone routes to review rather than rejection, because the screening finds
+Two consequences I chose deliberately. PEP matches cannot on their own reach
+the rejection threshold: being a politically exposed person is not illegal, and
+wholesale refusal --- de-risking --- is something regulators criticise, while
+the law asks for enhanced due diligence, which means a human. And a sanctions
+match alone routes to review rather than rejection, because screening finds
 \emph{names}, and identity is a judgement a person makes.
 
-Every scored application stores the ruleset version and the thresholds in force
-at the time, so a decision can be reconstructed after the rules have moved.
+Every scored application stores the ruleset version, the thresholds in force,
+and the revision of each FATF country list it was scored against: the plenary,
+its publication date, and a digest of the codes.
+
+That last part was a correction, not a design. The lists were a hand-typed
+constant, and checked against source they proved to be a set FATF never
+published --- Monaco, grey-listed June 2024, beside T\"urkiye and the UAE, both
+de-listed by then. FATF publishes each list complete at each plenary, so an
+absence is as much a statement as a presence, and a set mixing two is wrong in
+both directions: it screens against countries already cleared and misses those
+added since. It is now one statement's complete set, carrying that statement's
+date, with a test that fails if the codes move without the date.
 
 \textbf{The cost:} the weights are my judgement, not fitted to outcomes. A real
 firm would back-test them and have a model risk governance process. A points
@@ -303,15 +313,14 @@ nothing at all. A new event type added later is invisible to applicants until
 somebody decides what that audience may be told, which is the safe direction for
 that decision to default in.
 
-One subtlety worth knowing, because it is easy to undo: this works because the
-page is a React Server Component, so the raw rows never cross to the browser.
-Moving that list into a Client Component would serialise them into the payload
-again --- leaking without a single line of rendering code changing. A comment
-would not survive that refactor, so there is a test that fetches the live page
-and asserts that ``OFAC'', ``name similarity'', the score and the raw payload
-keys appear nowhere in the response. It has a counterweight test asserting the
-page still renders the applicant's own history, because a disclosure assertion
-is trivially satisfied by a blank page.
+One subtlety, because it is easy to undo: this works because the page is a
+React Server Component, so the raw rows never cross to the browser. Moving that
+list into a Client Component would serialise them into the payload again ---
+leaking without a line of rendering code changing. A comment would not survive
+that refactor, so a test fetches the live page and asserts that ``OFAC'', ``name
+similarity'', the score and the raw payload keys appear nowhere in the response,
+with a counterweight asserting the page still renders the applicant's own
+history --- a disclosure assertion is trivially satisfied by a blank page.
 
 \section{Sanctions provenance: what the hash does and does not prove}
 
@@ -452,10 +461,10 @@ not the test, but the noticing.
 
 \section{When one service may call another}
 
-The two services communicate only through the database. That rule exists to avoid
-an internal API --- one service asking the other to do something and waiting to
-hear how it went, which drags CORS, shared auth, retries and a second failure
-mode into a design that had none.
+The two services communicate only through the database, to avoid an internal
+API --- one service asking the other to do something and waiting to hear how it
+went, which drags CORS, shared auth, retries and a second failure mode into a
+design that had none.
 
 The deployed version bends it: after enqueueing work, the web application sends
 an HTTP request to the worker so an applicant sees a decision in seconds rather
@@ -470,8 +479,7 @@ passes a specific test:
 \end{itemize}
 
 Which reduces to one sentence: \textbf{delete the call and the system is still
-correct, only slower}. The queue still carries all the meaning; the HTTP request
-carries only timing.
+correct, only slower}. The queue carries the meaning; the call carries timing.
 
 The test then proved itself unplanned: the call silently did nothing for a period
 after deployment, and nothing broke. Applications were still decided by the
@@ -480,10 +488,10 @@ than a correctness one, exactly as the design predicted.
 
 \section{The worker as an on-demand function}
 
-Locally the worker is a long-lived loop: claim, run, sleep, repeat. That is the
-right shape, and it is what \texttt{docker compose up} gives you. It is also a
-process that must run somewhere permanently, and permanently costs money. I am
-not paying a monthly bill to host a portfolio demo.
+Locally the worker is a long-lived loop: claim, run, sleep, repeat --- the right
+shape, and what \texttt{docker compose up} gives you. It is also a process that
+must run somewhere permanently, and permanently costs money. I am not paying a
+monthly bill to host a portfolio demo.
 
 So production has a second entry point: an HTTP endpoint that claims a
 \emph{bounded} batch --- five jobs --- runs them and returns. Bounded because a
@@ -501,13 +509,10 @@ Same logic, two runtimes --- rather than pretending the deployed thing is the
 same thing.
 
 \textbf{The cost:} an applicant arriving when the database has been idle waits
-about 2.4 seconds for the first page that queries it, then roughly 0.3 for every
-page after. The five-minute schedule keeps the database awake, so this is paid
-only if the schedule has stopped.
+about 2.4 seconds for the first page that queries it, then roughly 0.3 after ---
+and the five-minute schedule keeps it awake, so it is rarely paid at all.
 
-\vspace{0.5em}
-\rule{\textwidth}{0.4pt}
-{\footnotesize Synthetic data throughout; no real person's data has been in this
-system. Every figure was measured, not estimated; where one moves, I say so.}
+\par\vspace{0.4em}\hrule\vspace{0.35em}\noindent
+{\footnotesize Synthetic data throughout. Every figure here was measured, not estimated.}
 
 \end{document}
