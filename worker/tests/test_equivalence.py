@@ -66,6 +66,22 @@ def db():
         conn = psycopg.connect(database_url(), autocommit=True, connect_timeout=5)
     except Exception as err:  # noqa: BLE001
         pytest.skip(f"no database reachable: {err}")
+
+    # Reachable is not the same as migrated, and the difference used to
+    # surface three frames deep as `UndefinedTable: relation
+    # "sanctions_snapshots" does not exist` from inside load_into_postgres.
+    # A connection to an empty database is a precondition failure, so it is
+    # checked here where the message can name the cause.
+    with conn.cursor() as cur:
+        cur.execute("select to_regclass('public.sanctions_snapshots')")
+        if cur.fetchone()[0] is None:
+            conn.close()
+            pytest.skip(
+                f"{database_url().rsplit('/', 1)[-1]} has no sanctions schema "
+                "— run `python db/migrate.py up` against DATABASE_URL. This "
+                "test reads the development database on purpose; see above."
+            )
+
     try:
         yield conn
     finally:

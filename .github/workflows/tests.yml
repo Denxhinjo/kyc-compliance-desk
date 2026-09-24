@@ -53,6 +53,28 @@ jobs:
       - name: Install dependencies
         run: pip install -r worker/requirements.txt
 
+      # Almost every test here runs against the throwaway `<db>_test` schema,
+      # which conftest.py rebuilds per session. test_equivalence.py is the
+      # exception: it compares the in-memory matcher against the Postgres one
+      # using DATABASE_URL itself, because it wants a loaded sanctions list and
+      # a seeded population rather than an empty schema.
+      #
+      # Locally that database is the developer's own and already has both. On a
+      # runner it is whatever the service container created, which is empty —
+      # so without these two steps the job dies on a missing table, which is
+      # how it went red on 22 September and stayed red.
+      - name: Migrate the development database
+        run: python db/migrate.py up
+
+      - name: Seed a population to compare the matchers against
+        working-directory: worker
+        # SANCTIONS_SOURCE=synthetic at job level, so this is the committed
+        # 25-entry fixture: seconds, not the four minutes OFAC takes. A
+        # narrower comparison than a local run, and still enough to catch a
+        # stage-1 filter that disagrees with stage 2 — the bug it was written
+        # for. Fixed seed so a failure is reproducible.
+        run: python seed.py --count 120 --weeks 2 --seed 4242
+
       - name: Run the tests
         working-directory: worker
         # -q for a readable log; the failures are what anyone reads this for.
