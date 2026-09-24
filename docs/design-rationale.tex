@@ -6,6 +6,16 @@
 \usepackage[margin=2.4cm,bottom=2.0cm]{geometry}
 \usepackage{microtype}
 
+% Document properties, so the file identifies its author when opened or
+% catalogued. Producer and Creator are left to the TeX toolchain, which is
+% what they are for.
+\pdfinfo{
+  /Author   (Denis Xhabrahimi)
+  /Title    (Design rationale: KYC onboarding and compliance review desk)
+  /Subject  (Architecture and design decisions, with the options rejected)
+  /Keywords (KYC, AML, sanctions screening, PostgreSQL, job queue, audit log)
+}
+
 % Code fragments are rare and short. Where one appears, the code IS the
 % argument, so it gets a slightly indented block and nothing else.
 \newenvironment{code}%
