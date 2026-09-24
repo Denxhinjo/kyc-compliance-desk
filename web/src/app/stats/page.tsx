@@ -408,8 +408,15 @@ function DayChart({ rows }: { rows: DayRow[] }) {
     );
   }
 
+  // Two elements rather than one, for the same reason `.table-scroll` wraps a
+  // table: the scroller must be a plain block whose own minimum width is zero,
+  // with the wide thing inside it. When .chart was both the scroller and the
+  // flex row, its thirty columns still reported a ~531px minimum to the phone's
+  // viewport sizing, and the browser answered by rendering the whole page at
+  // about 75% scale rather than by scrolling the chart.
   return (
-    <div className="chart" role="img" aria-label={`${total} decisions over the last 30 days`}>
+    <div className="chart-scroll">
+      <div className="chart" role="img" aria-label={`${total} decisions over the last 30 days`}>
       {rows.map((row) => {
         const sum = row.approved + row.rejected;
         return (
@@ -431,6 +438,7 @@ function DayChart({ rows }: { rows: DayRow[] }) {
           </div>
         );
       })}
+      </div>
     </div>
   );
 }

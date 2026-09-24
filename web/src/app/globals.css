@@ -553,9 +553,21 @@ kbd {
   color: var(--accent);
 }
 
-.table-scroll {
+/* `position: relative` is load-bearing, not decoration.
+   Overflow only clips an absolutely-positioned descendant when the scroller is
+   that descendant's containing block, and a static element never is. The chart
+   puts an .sr-only span in each of its thirty columns; those are 1x1 and
+   clipped, but they are positioned, so with a static scroller their containing
+   block was the page. Each sat at its static position inside the 533px-wide
+   row, the last ones landing past x=500, and the document stretched to 519px
+   on a 390px screen — a phone then renders the whole page at about 75% scale.
+   Making the scroller the containing block brings them back inside it. */
+.table-scroll,
+.chart-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  min-width: 0;
+  position: relative;
 }
 
 /* --- Empty states ---------------------------------------------------------- */
@@ -1442,9 +1454,18 @@ pre {
   }
 
   /* Thirty bars at phone width would be 8px each. Scroll with legible columns
-     rather than rendering thirty unreadable slivers. */
+     rather than rendering thirty unreadable slivers.
+
+     The scrolling lives on the wrapper, not on .chart itself. As one element
+     .chart was both the scroll container and the flex row, and its thirty
+     columns still reported a ~531px minimum width to the phone's viewport
+     sizing — which a phone resolves by scaling the entire page down, not by
+     scrolling the one element. Splitting them gives the scroller a minimum of
+     zero and leaves the wide thing inside it, the same shape as
+     .table-scroll, which never had this problem. */
   .chart {
-    overflow-x: auto;
+    width: max-content;
+    min-width: 100%;
   }
   .chart-col {
     min-width: 14px;
@@ -1456,5 +1477,69 @@ pre {
   }
   dd {
     margin-bottom: var(--space-2);
+  }
+
+  /* --- Phone fixes ------------------------------------------------------- */
+
+  /* Grid and flex items default to `min-width: auto`, which refuses to shrink
+     below the item's min-content width. On the case view that left
+     .panel-block 578px wide inside a 390px viewport, and a phone does not
+     clip or scroll in that situation — it zooms the whole page out until the
+     widest thing fits. So nothing looked broken, everything just rendered
+     slightly too small, which is a much harder symptom to report than a
+     visibly cut-off column.
+
+     Measured: the case view laid out at 590px and stats at 519px on a 390px
+     screen, i.e. the page was being shown at about 66% and 75% scale. */
+  .case-grid > *,
+  .panel-block,
+  .decide-block,
+  .table-scroll {
+    min-width: 0;
+  }
+
+  /* iOS Safari zooms in when a focused control has a font-size below 16px,
+     and does not zoom back out when the field is blurred — the page is simply
+     left magnified and off-centre. 16px is the threshold, not a preference,
+     so it is set in pixels rather than a token that could drift under it. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  /* Touch targets. 35px-tall buttons and 15px-tall text links are fine with a
+     cursor and fiddly with a thumb; 44px is the figure both Apple and Google
+     publish. Applied by padding rather than height so the label stays
+     vertically centred. */
+  .button,
+  .btn {
+    min-height: 44px;
+    padding-block: var(--space-3);
+  }
+
+  /* Back links sit alone on a line, so widening them costs no layout. */
+  .crumb a {
+    display: inline-block;
+    padding: var(--space-3) 0;
+  }
+
+  /* The desk bar's two controls. Padding rather than min-height, so the bar
+     keeps wrapping the way it already does at this width. */
+  .desk-brand,
+  .linkish {
+    display: inline-block;
+    padding-block: var(--space-2);
+  }
+
+  /* Queue rows are pinned to one height so the eye can run down a column
+     without the pitch changing. That is still true here — the height is just
+     a thumb's worth rather than a cursor's. */
+  .queue td {
+    height: 2.75rem;
+  }
+  .grid td a {
+    display: inline-block;
+    padding-block: var(--space-1);
   }
 }
