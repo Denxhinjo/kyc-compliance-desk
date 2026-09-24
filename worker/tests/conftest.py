@@ -40,6 +40,21 @@ psycopg = pytest.importorskip("psycopg")
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 MIGRATE = REPO_ROOT / "db" / "migrate.py"
 
+# Load the root .env HERE, before any fixture reads os.environ.
+#
+# This used to happen only as a side effect of importing worker/config.py,
+# which calls load_dotenv() at module scope. Whether DATABASE_URL was set
+# therefore depended on whether some other collected module had imported
+# config first — so `pytest` reported 204 passed while
+# `pytest tests/test_scoring.py` reported 65 skipped: green, having run
+# nothing. What a suite tests may not depend on what else was collected.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(REPO_ROOT / ".env")
+except ImportError:  # absent on a bare runner, where the environment is real
+    pass
+
 
 def _test_database_url() -> str | None:
     explicit = os.environ.get("TEST_DATABASE_URL")
@@ -115,28 +130,22 @@ def schema(database_url: str) -> str:
             "migrations failed against the test database:\n"
             f"{result.stdout}\n{result.stderr}"
         )
-    return database_url
 
-
-@pytest.fixture(scope="session", autouse=True)
-def sanctions_list(schema: str):
-    """Put the committed synthetic list into the test database.
-
-    Since the list moved out of the worker's memory and into Postgres, a
-    screening job needs a loaded snapshot the way it used to need a file. A
-    database with no list is not a neutral starting point any more — it is a
-    worker that cannot screen.
-
-    Autouse and session-scoped because it is cheap (25 entries) and because
-    every DB-backed test that touches screening would otherwise have to
-    remember to ask for it, and the one that forgot would fail confusingly.
-    """
-    import psycopg
-
+    # The synthetic list, loaded here rather than by a separate autouse
+    # fixture. Since screening moved into Postgres a database with no list is
+    # not a neutral starting point — it is a worker that cannot screen — so
+    # every schema rebuild ends with one loaded. 25 entries; the cost is noise.
+    #
+    # It WAS an autouse fixture, and that was the bug: autouse made it apply to
+    # all 205 tests, and because it depended on THIS fixture, every pure test
+    # inherited a database requirement it never had. Which is precisely what
+    # the note above says this fixture is not autouse in order to avoid.
     from screening.sources import load_index, load_into_postgres
 
-    with psycopg.connect(schema, autocommit=True, connect_timeout=5) as conn:
+    with psycopg.connect(database_url, autocommit=True, connect_timeout=5) as conn:
         load_into_postgres(conn, load_index("synthetic"))
+
+    return database_url
 
 
 @pytest.fixture(scope="session")

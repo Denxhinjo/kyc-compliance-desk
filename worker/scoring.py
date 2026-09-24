@@ -49,6 +49,7 @@ WHY POINTS AND NOT A MODEL
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -139,12 +140,111 @@ class Routing:
 
 
 @dataclass(frozen=True)
+class CountryListing:
+    """The FATF country lists, carrying the provenance of the lists themselves.
+
+    WHY THIS IS NOT IN POSTGRES WHEN THE SANCTIONS LIST IS
+
+    The sanctions list moved into Postgres because of size and search: 19,393
+    entries needing a trigram index. Provenance rode along in that change but
+    was not what drove it. Twenty-four country codes have neither problem, so
+    storing them the same way would be copying the mechanism rather than the
+    reason. A change to a legal list should be a reviewable commit, and a diff
+    is a better audit artefact than an UPDATE nobody sees.
+
+    What the sanctions side had and this did not is the provenance itself —
+    which revision these codes came from. That is what this type adds, along
+    with a refusal to invent the answer when it cannot be established.
+    """
+
+    call_for_action: frozenset[str]
+    increased_monitoring: frozenset[str]
+    source_url: str
+
+    #: FATF's own publication date for this revision, ISO-8601 — or None when
+    #: the codes cannot be traced to a single published revision.
+    #:
+    #: Never a date chosen because it looks plausible. The synthetic sanctions
+    #: fixture leaves published_at null for exactly this reason: a manufactured
+    #: date is worse than an absent one, because it claims an authority it does
+    #: not have and survives review precisely by looking right.
+    published_at: str | None
+
+    #: Why published_at is what it is. Recorded on every decision beside it, so
+    #: the limitation travels with the score instead of living in a comment
+    #: nobody reads at the moment of doubt.
+    provenance: str
+
+    @property
+    def digest(self) -> str:
+        """A hash of the codes, so an edit cannot pass unnoticed.
+
+        test_country_lists.py pins this value. Changing either set without
+        updating published_at and the pinned digest fails that test, which is
+        the whole mechanism: the lists are allowed to change, but not quietly,
+        and not without restating where the new ones came from.
+        """
+        payload = "|".join(
+            (
+                ",".join(sorted(self.call_for_action)),
+                ",".join(sorted(self.increased_monitoring)),
+            )
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def as_dict(self) -> dict[str, Any]:
+        """What gets stored on a decision."""
+        return {
+            "source_url": self.source_url,
+            "published_at": self.published_at,
+            "provenance": self.provenance,
+            "digest": self.digest,
+        }
+
+
+COUNTRY_LISTING = CountryListing(
+    call_for_action=frozenset({"IR", "KP", "MM"}),
+    increased_monitoring=frozenset(
+        {"BF", "CM", "HR", "CD", "HT", "ML", "MZ", "MC", "NA", "NG",
+         "PH", "SN", "ZA", "SS", "SY", "TZ", "TR", "UG", "AE", "VN", "YE"}
+    ),
+    source_url=(
+        "https://www.fatf-gafi.org/en/topics/"
+        "high-risk-and-other-monitored-jurisdictions.html"
+    ),
+    published_at=None,
+    provenance=(
+        "UNSOURCED. These codes are demo data and do not transcribe any FATF "
+        "revision. They cannot: the increased-monitoring set holds Monaco, "
+        "grey-listed at the June 2024 plenary, beside Turkiye and the United "
+        "Arab Emirates, de-listed at that same plenary and in February 2024 "
+        "respectively — a combination FATF never published. The call-for-action "
+        "set (IR, KP, MM) does match the real one, which has been those three "
+        "since Myanmar was added in October 2022. Rather than assign a "
+        "publication date that would make the whole thing look sourced, "
+        "published_at is null. Before any real use: replace both sets from "
+        "source_url and set published_at to that plenary's own date."
+    ),
+)
+
+#: Kept as module-level names because they read better at the point of use and
+#: because the scoring tests import them directly.
+FATF_CALL_FOR_ACTION = COUNTRY_LISTING.call_for_action
+FATF_INCREASED_MONITORING = COUNTRY_LISTING.increased_monitoring
+
+
+@dataclass(frozen=True)
 class RiskAssessment:
     score: int
     signals: tuple[Signal, ...]
     routing: str
     thresholds: Thresholds
     ruleset_version: str = RULESET_VERSION
+    #: Recorded on every assessment, not only the ones a country signal fired
+    #: on. "These lists were consulted and this country was on neither" is
+    #: itself a finding, and an auditor asking why a jurisdiction was not
+    #: flagged needs the same provenance as one asking why it was.
+    country_listing: CountryListing = COUNTRY_LISTING
 
     @property
     def reasons(self) -> tuple[str, ...]:
@@ -163,6 +263,7 @@ class RiskAssessment:
             "routing": self.routing,
             "ruleset_version": self.ruleset_version,
             "thresholds": self.thresholds.as_dict(),
+            "country_list": self.country_listing.as_dict(),
             "signals": [
                 {
                     "code": s.code,
@@ -234,15 +335,6 @@ PEP_POINTS = {"confirmed": 30, "probable": 15, "weak": 5}
 
 ADVERSE_MEDIA_POINTS = {"confirmed": 10, "probable": 10, "weak": 5}
 
-#: FATF listings, as at 2026-09. MUST be re-checked against fatf-gafi.org
-#: before any real use — this is a legal list with a publication date, not a
-#: constant. It is here in the code rather than in a database so that a change
-#: to it is a reviewable commit.
-FATF_CALL_FOR_ACTION = frozenset({"IR", "KP", "MM"})
-FATF_INCREASED_MONITORING = frozenset(
-    {"BF", "CM", "HR", "CD", "HT", "ML", "MZ", "MC", "NA", "NG",
-     "PH", "SN", "ZA", "SS", "SY", "TZ", "TR", "UG", "AE", "VN", "YE"}
-)
 
 COUNTRY_CALL_FOR_ACTION_POINTS = 40
 COUNTRY_MONITORING_POINTS = 15

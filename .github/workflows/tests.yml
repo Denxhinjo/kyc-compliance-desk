@@ -209,3 +209,56 @@ jobs:
           STRICT_DISCLOSURE_TEST: "1"
         # -rs so the log says what happened rather than printing four dots.
         run: python -m pytest tests/test_applicant_disclosure.py -v -rs
+
+  # -------------------------------------------------------------------------
+  # Noticing.
+  #
+  # This job exists because seven consecutive red runs over two days went
+  # unseen, on a repository whose README carries the badge. A suite nobody is
+  # told about is a suite nobody is running.
+  #
+  # It files an issue rather than sending mail, deliberately. Mail depends on
+  # a per-account notification preference that is invisible from inside the
+  # repository and that nobody audits. An issue is a repository object: it
+  # shows in the issues tab, it notifies through whatever channel each watcher
+  # has chosen, and it is still there tomorrow if today's mail was missed.
+  #
+  # One issue, reused. A new issue per failed push would train exactly the
+  # habit this exists to prevent.
+  notify-on-failure:
+    name: file an issue when the suite goes red
+    runs-on: ubuntu-latest
+    needs: [worker, web, disclosure]
+    if: failure() && github.ref == 'refs/heads/master'
+
+    permissions:
+      issues: write
+
+    steps:
+      - name: Open or update the failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          TITLE="CI is failing on master"
+          EXISTING=$(gh issue list --repo "$REPO" --state open --search "$TITLE in:title" --json number --jq '.[0].number // empty')
+
+          {
+            echo "The test suite failed on master."
+            echo
+            echo "- commit: \`$SHA\`"
+            echo "- run: $RUN_URL"
+            echo
+            echo "The README badge is red while this is open."
+          } > body.md
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --repo "$REPO" --body-file body.md
+            echo "commented on existing issue #$EXISTING"
+          else
+            gh issue create --repo "$REPO" --title "$TITLE" --body-file body.md --assignee "$OWNER"
+            echo "opened a new issue"
+          fi

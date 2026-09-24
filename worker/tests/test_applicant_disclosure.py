@@ -141,6 +141,19 @@ def flagged_application(web_service):
     except Exception as err:  # noqa: BLE001 — any connection problem
         unavailable(f"no database reachable: {err}")
 
+    # Reachable is not migrated. Without this the next execute raises
+    # UndefinedTable from inside the fixture, which reads as a broken test
+    # rather than an unprovisioned database — the same confusion that kept the
+    # equivalence test's real cause hidden for two days.
+    with connection.cursor() as cur:
+        cur.execute("select to_regclass('public.audit_events')")
+        if cur.fetchone()[0] is None:
+            connection.close()
+            unavailable(
+                "the database has no schema — run `python db/migrate.py up` "
+                "against DATABASE_URL, then worker/seed.py"
+            )
+
     try:
         with connection.cursor() as cur:
             cur.execute(

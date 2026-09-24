@@ -3,7 +3,7 @@
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
-\usepackage[margin=2.4cm,bottom=2.0cm]{geometry}
+\usepackage[margin=2.4cm,bottom=1.7cm]{geometry}
 \usepackage{microtype}
 
 % Document properties, so the file identifies its author when opened or
@@ -328,14 +328,14 @@ was loaded. The chain runs decision → match → list version → digest.
 used byte-identical content, which makes ``the same list'' checkable rather than
 assumed.
 
-\textbf{What it does not prove.} The digest is of the JSON file my downloader
-writes, not of the XML the US Treasury published, so it attests to my
-\emph{parser's output}, not to the publisher's document. The file is gitignored
-and never committed, so a reader cannot recompute it from the repository. And it
-is recorded, not verified: nothing checks the digest on load, so a corrupted file
-would be recorded faithfully as corrupt. The right guard is cross-checking
-against OFAC's own declared record count and the previous snapshot, which I have
-not built.
+\textbf{What it does not prove.} The digest is of the JSON my downloader writes,
+not the XML the US Treasury published, so it attests to my \emph{parser's
+output} rather than the publisher's document. That file is gitignored, so a
+reader cannot recompute it from the repository. And it is recorded, not
+verified: nothing checks the digest on load, so a corrupted file would be
+recorded faithfully as corrupt. The guard for that is a cross-check against
+OFAC's declared record count and the previous snapshot, which I have not
+built.
 
 Staleness is also unsolved: the list is loaded at deployment and nothing refreshes
 it. Recording the publication date makes that \emph{visible} --- an old date next
@@ -440,6 +440,15 @@ entity id, which makes the tie-break a decision rather than an accident.
 I include this because ``why should I trust your judgement'' is a fair question
 and the honest answer is not that I do not make mistakes. It is that I try to
 build the thing that would tell me.
+
+A mechanism is worth what its execution is worth, though, and this one spent two
+days running nowhere. The equivalence test reads the development database rather
+than the throwaway one, because it needs a loaded list and a seeded population;
+the CI runner provisioned neither, so the job died on a missing table and stayed
+red for seven pushes while my README badge advertised it. It passed on my
+machine throughout, which is why I did not see it. The runner now provisions
+what the test reads, and a failed suite opens an issue --- what had failed was
+not the test, but the noticing.
 
 \section{When one service may call another}
 
