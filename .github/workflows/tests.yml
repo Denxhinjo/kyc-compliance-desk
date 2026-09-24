@@ -78,7 +78,11 @@ jobs:
       - name: Run the tests
         working-directory: worker
         # -q for a readable log; the failures are what anyone reads this for.
-        run: python -m pytest -q
+        # -rs because a skip is a test that did not run, and the log should say
+        # which and why without anyone having to reproduce it locally to find
+        # out. The four that skip here are the disclosure tests, which need a
+        # web server and get one in the disclosure job instead.
+        run: python -m pytest -q -rs
 
   web:
     name: web (typecheck)
