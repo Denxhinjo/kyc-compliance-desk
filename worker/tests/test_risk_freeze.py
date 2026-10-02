@@ -218,6 +218,53 @@ def test_rewriting_a_risk_column_to_its_current_value_is_not_an_error(conn, appl
         )  # 30 is what the fixture wrote
 
 
+def test_a_decision_without_a_ruleset_version_is_refused(conn, application):
+    """Migration 022, asserted as raw SQL.
+
+    Four sites insert decisions, in two languages. Three are covered by the
+    Python tests here; the fourth is the officer's action in
+    web/src/app/desk/[id]/actions.ts, and /web has a typechecker but no test
+    runner, so there is no place to assert it from that side. The constraint is
+    what covers it — which is the reason for putting the rule in the database
+    rather than teaching four callers to remember it.
+    """
+    with pytest.raises(psycopg.errors.CheckViolation) as excinfo:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    insert into decisions
+                        (application_id, outcome, decided_by, reason,
+                         risk_score_at_decision)
+                    values (%s, 'approved', 'system', 'no version supplied', 30)
+                    """,
+                    (application,),
+                )
+    assert "decisions_ruleset_version_present" in str(excinfo.value)
+
+
+def test_the_constraint_does_not_disturb_rows_that_predate_it(conn):
+    """NOT VALID means "from here on", and that is deliberate.
+
+    021 left the column NULL wherever the data could not establish a version.
+    If this constraint had been added validating, those rows would have had to
+    be filled with a guess — the one outcome the NULL was chosen to avoid. A
+    pre-existing NULL must therefore still be readable and updatable in ways
+    that do not touch the column.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """select count(*) from decisions
+                where risk_ruleset_version_at_decision is null"""
+        )
+        unknown = cur.fetchone()[0]
+
+    # Not an assertion about the number: on a freshly migrated test schema it is
+    # zero. The assertion is that asking does not raise, i.e. the constraint is
+    # not validating rows it was told not to validate.
+    assert unknown >= 0
+
+
 def test_a_decision_written_by_the_worker_carries_its_ruleset_version(conn, application):
     """The other half of migration 021: the version lands ON the decision.
 

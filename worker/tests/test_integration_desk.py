@@ -22,6 +22,7 @@ psycopg = pytest.importorskip("psycopg")
 
 import screening_handler  # noqa: E402
 from jobs import Job, enqueue_job  # noqa: E402
+from scoring import RULESET_VERSION  # noqa: E402
 from screening import sources  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -57,14 +58,16 @@ def decide_like_the_desk(conn, application_id: str, officer: str, outcome: str) 
             cur.execute(
                 """
                 insert into decisions
-                    (application_id, outcome, decided_by, reason, risk_score_at_decision)
-                values (%s, %s, %s, %s, null)
+                    (application_id, outcome, decided_by, reason,
+                     risk_score_at_decision, risk_ruleset_version_at_decision)
+                values (%s, %s, %s, %s, null, %s)
                 """,
                 (
                     application_id,
                     outcome,
                     officer,
                     "Reviewed the document check and the screening matches.",
+                    RULESET_VERSION,
                 ),
             )
             cur.execute(
@@ -137,8 +140,9 @@ def test_the_constraint_refuses_a_second_decision_even_without_the_lock(
     application_id = make_application("screening")
     with db.cursor() as cur:
         cur.execute(
-            "insert into decisions (application_id, outcome, decided_by, reason) "
-            "values (%s, 'approved', 'staff:alice', 'Documents and screening checked.')",
+            "insert into decisions (application_id, outcome, decided_by, reason, "
+            "                       risk_ruleset_version_at_decision) "
+            "values (%s, 'approved', 'staff:alice', 'Documents and screening checked.', '" + RULESET_VERSION + "')",
             (application_id,),
         )
 
@@ -146,8 +150,9 @@ def test_the_constraint_refuses_a_second_decision_even_without_the_lock(
         with db.transaction():
             with db.cursor() as cur:
                 cur.execute(
-                    "insert into decisions (application_id, outcome, decided_by, reason) "
-                    "values (%s, 'rejected', 'staff:bob', 'Documents and screening checked.')",
+                    "insert into decisions (application_id, outcome, decided_by, reason, "
+                    "                       risk_ruleset_version_at_decision) "
+                    "values (%s, 'rejected', 'staff:bob', 'Documents and screening checked.', '" + RULESET_VERSION + "')",
                     (application_id,),
                 )
 
@@ -161,8 +166,9 @@ def test_a_referral_and_a_verdict_can_coexist(db, make_application):
     application_id = make_application("screening")
     with db.cursor() as cur:
         cur.execute(
-            "insert into decisions (application_id, outcome, decided_by, reason) "
-            "values (%s, 'referred', 'system', 'Score 45: sanctions near-match.')",
+            "insert into decisions (application_id, outcome, decided_by, reason, "
+            "                       risk_ruleset_version_at_decision) "
+            "values (%s, 'referred', 'system', 'Score 45: sanctions near-match.', '" + RULESET_VERSION + "')",
             (application_id,),
         )
     decide_like_the_desk(db, application_id, "staff:alice", "approved")
