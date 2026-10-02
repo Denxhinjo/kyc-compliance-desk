@@ -924,7 +924,7 @@ def _seed_one(conn, rng, applicant, created_at, index, counts, snapshot_id,
 
         if assessment.routing == Routing.REVIEW:
             _decision(conn, application_id, "referred", "system", reason,
-                      assessment.score, screened_at)
+                      assessment.score, screened_at, assessment.ruleset_version)
             _audit(conn, application_id, screened_at, "system:worker",
                    "decision.recorded",
                    {"outcome": "referred", "decided_by": "system",
@@ -951,7 +951,7 @@ def _seed_one(conn, rng, applicant, created_at, index, counts, snapshot_id,
             outcome = "approved" if approve else "rejected"
             _decision(conn, application_id, outcome, officer,
                       _human_reason(approve, assessment, rng, detail),
-                      assessment.score, decided_at)
+                      assessment.score, decided_at, assessment.ruleset_version)
             _set_status(conn, application_id, "decided", decided_at, session_id,
                         vendor_status=vendor_status, vendor_result_at=vendor_at)
             _audit(conn, application_id, decided_at, officer,
@@ -963,7 +963,7 @@ def _seed_one(conn, rng, applicant, created_at, index, counts, snapshot_id,
 
         outcome = "approved" if assessment.routing == Routing.APPROVE else "rejected"
         _decision(conn, application_id, outcome, "system", reason,
-                  assessment.score, screened_at)
+                  assessment.score, screened_at, assessment.ruleset_version)
         _set_status(conn, application_id, "decided", screened_at, session_id,
                     vendor_status=vendor_status, vendor_result_at=vendor_at)
         _audit(conn, application_id, screened_at, "system:worker",
@@ -1010,16 +1010,18 @@ def _audit(conn, application_id, at, actor, action, details) -> None:
         )
 
 
-def _decision(conn, application_id, outcome, by, reason, score, at) -> None:
+def _decision(conn, application_id, outcome, by, reason, score, at,
+              ruleset_version) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
             insert into decisions
                 (application_id, outcome, decided_by, reason,
-                 risk_score_at_decision, decided_at)
-            values (%s, %s, %s, %s, %s, %s)
+                 risk_score_at_decision, decided_at,
+                 risk_ruleset_version_at_decision)
+            values (%s, %s, %s, %s, %s, %s, %s)
             """,
-            (application_id, outcome, by, reason, score, at),
+            (application_id, outcome, by, reason, score, at, ruleset_version),
         )
 
 

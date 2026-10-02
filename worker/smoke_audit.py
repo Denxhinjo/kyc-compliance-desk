@@ -17,6 +17,7 @@ from psycopg.types.json import Jsonb
 
 from audit import log_event
 from db import connect
+from scoring import RULESET_VERSION
 
 
 def latest_application(conn: psycopg.Connection) -> str | None:
@@ -126,12 +127,23 @@ def record_screening(conn: psycopg.Connection, application_id: str) -> None:
 def record_decision(conn: psycopg.Connection, application_id: str) -> None:
     with conn.transaction():
         with conn.cursor() as cur:
+            # The score is written BEFORE the decision row, not after.
+            #
+            # Migration 020 freezes an application's risk columns once a
+            # decision exists for it, so the original order — insert the
+            # decision, then set risk_score in the same statement as the status
+            # — is now refused. Writing the score first is also the truthful
+            # order: a decision is taken on a score that already exists.
+            cur.execute(
+                "update applications set risk_score = 42 where id = %s",
+                (application_id,),
+            )
             cur.execute(
                 """
                 insert into decisions
                     (application_id, outcome, decided_by, reason,
-                     risk_score_at_decision)
-                values (%s, %s, %s, %s, %s)
+                     risk_score_at_decision, risk_ruleset_version_at_decision)
+                values (%s, %s, %s, %s, %s, %s)
                 """,
                 (
                     application_id,
@@ -140,11 +152,11 @@ def record_decision(conn: psycopg.Connection, application_id: str) -> None:
                     "PEP match reviewed: different date of birth and nationality. "
                     "Not the listed individual.",
                     42,
+                    RULESET_VERSION,
                 ),
             )
             cur.execute(
-                "update applications set status = 'decided', risk_score = 42 "
-                "where id = %s",
+                "update applications set status = 'decided' where id = %s",
                 (application_id,),
             )
 

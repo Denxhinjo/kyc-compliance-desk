@@ -86,21 +86,32 @@ export async function decide(
         return { alreadyDecidedBy: existing.rows[0].decided_by } as DecideState;
       }
 
-      const scored = await client.query<{ risk_score: number | null }>(
-        `select risk_score from applications where id = $1`,
+      // The ruleset version alongside the score, for the same reason: a
+      // decision has to carry its own inputs. Reading it here rather than
+      // recomputing is safe because migration 020 freezes both columns once a
+      // decision row exists — and a case reaching this desk is a referral, so
+      // one already does. What is read here is therefore the value the referral
+      // was made on, not a later re-score.
+      const scored = await client.query<{
+        risk_score: number | null;
+        risk_ruleset_version: string | null;
+      }>(
+        `select risk_score, risk_ruleset_version from applications where id = $1`,
         [applicationId],
       );
 
       await client.query(
         `insert into decisions
-           (application_id, outcome, decided_by, reason, risk_score_at_decision)
-         values ($1, $2, $3, $4, $5)`,
+           (application_id, outcome, decided_by, reason,
+            risk_score_at_decision, risk_ruleset_version_at_decision)
+         values ($1, $2, $3, $4, $5, $6)`,
         [
           applicationId,
           outcome,
           actorFor(session),
           reason,
           scored.rows[0]?.risk_score ?? null,
+          scored.rows[0]?.risk_ruleset_version ?? null,
         ],
       );
 

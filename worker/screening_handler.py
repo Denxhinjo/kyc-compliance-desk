@@ -380,8 +380,20 @@ def _insert_decision(
         cur.execute(
             """
             insert into decisions
-                (application_id, outcome, decided_by, reason, risk_score_at_decision)
-            values (%s, %s, %s, %s, %s)
+                (application_id, outcome, decided_by, reason,
+                 risk_score_at_decision, risk_ruleset_version_at_decision)
+            values (%s, %s, %s, %s, %s, %s)
             """,
-            (application_id, outcome, decided_by, reason, assessment.score),
+            # The version comes from the assessment that produced this verdict,
+            # not from a re-read of the application. They agree today; taking it
+            # from the assessment means they cannot disagree tomorrow, and it is
+            # the same reasoning that puts the score here rather than a lookup.
+            (
+                application_id,
+                outcome,
+                decided_by,
+                reason,
+                assessment.score,
+                assessment.ruleset_version,
+            ),
         )
