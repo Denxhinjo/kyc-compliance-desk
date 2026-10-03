@@ -1543,3 +1543,26 @@ pre {
     padding-block: var(--space-1);
   }
 }
+
+/* --- Rules versions ------------------------------------------------------- */
+
+/* Sourcing pills sit on one line and wrap together, so "UNSOURCED" is read at
+   the same moment as the version it belongs to rather than below the fold. */
+.sourcing-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+
+/* The change note is prose and is shown in full. Measure-capped so a 1,500
+   character note stays readable, not truncated — a version whose reason has
+   been cut off cannot be defended by whoever has to defend it. */
+.change-note {
+  border-left: var(--border-width) solid var(--border);
+  color: var(--text-muted);
+  margin: var(--space-3) 0;
+  max-width: 68ch;
+  padding-left: var(--space-3);
+  white-space: pre-wrap;
+}

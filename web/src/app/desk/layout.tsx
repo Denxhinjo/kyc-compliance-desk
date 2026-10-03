@@ -38,6 +38,11 @@ export default async function DeskLayout({
         <span className="desk-sep">/</span>
         <span className="desk-demo">demo — synthetic applicants</span>
         <span className="desk-spacer" />
+        {/* A page nobody can reach is a page that does not exist. One link,
+            in the shell that already wraps every desk page. */}
+        <Link href="/desk/rulesets" className="desk-user">
+          Rules versions
+        </Link>
         <span className="desk-user">{session.email}</span>
         <form action={signOut}>
           <button type="submit" className="linkish">
