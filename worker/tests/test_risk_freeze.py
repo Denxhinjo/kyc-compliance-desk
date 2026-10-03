@@ -36,6 +36,8 @@ psycopg = pytest.importorskip("psycopg")
 
 from psycopg.types.json import Jsonb  # noqa: E402
 
+from scoring import RULESET_VERSION  # noqa: E402
+
 #: started -> submitted -> checking -> screening, the only route to a state from
 #: which an application may be decided. Mirrors application_transitions; the
 #: lifecycle test is what proves that table and lifecycle.py agree.
@@ -446,3 +448,131 @@ def test_a_parked_job_for_a_different_application_is_irrelevant(conn, applicatio
             """,
             (application,),
         )
+
+
+# ---------------------------------------------------------------------------
+# The case view's two conditions: one blocks, one only warns
+# ---------------------------------------------------------------------------
+
+#: The predicates the case view queries on, copied from
+#: web/src/app/desk/[id]/page.tsx.
+#:
+#: WHAT THESE TESTS DO AND DO NOT COVER, SINCE IT MATTERS
+#:
+#: They assert the CONDITIONS, not the rendering. /web has a typechecker and no
+#: test runner, so there is nowhere to assert that a <div> appears; the server
+#: actions and pages are only covered by the compiler and by the live-page
+#: fetches in test_applicant_disclosure.py, which run unauthenticated and cannot
+#: reach a case view behind requireStaff().
+#:
+#: So what is proven here is that the data distinguishes the three states the
+#: page branches on, and that the branch which must not block does not. A
+#: regression in the JSX itself would not be caught, and that is a real gap
+#: rather than an oversight — it is the same gap migration 023 exists to make
+#: survivable, by refusing in the database rather than relying on the page.
+BLOCKING_SQL = """
+    select id from jobs
+     where job_type = 'screening.run' and status = 'parked'
+       and payload->>'application_id' = %s
+"""
+WARNING_SQL = """
+    select id from jobs
+     where job_type = 'screening.run' and status = 'queued'
+       and last_error is not null
+       and payload->>'application_id' = %s
+"""
+
+
+def queue_retrying_job(conn, application_id, error="transient failure") -> int:
+    """A screening job that failed once and is waiting to try again."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into jobs (job_type, payload, status, last_error, run_after)
+            values ('screening.run', %s, 'queued', %s, now() + interval '30 seconds')
+            returning id
+            """,
+            (Jsonb({"application_id": str(application_id)}), error),
+        )
+        return cur.fetchone()[0]
+
+
+def matches(conn, sql, application_id) -> list[int]:
+    with conn.cursor() as cur:
+        cur.execute(sql, (str(application_id),))
+        return [r[0] for r in cur.fetchall()]
+
+
+def test_a_retrying_job_raises_the_warning_and_not_the_block(conn, application):
+    """The warning condition is true and the blocking condition is not.
+
+    These are the two branches the case view chooses between. If a retrying job
+    satisfied both, the page would show the blocking message and the officer
+    would be stopped by something that may yet resolve itself.
+    """
+    decide(conn, application, outcome="referred")
+    job_id = queue_retrying_job(conn, application)
+
+    assert matches(conn, WARNING_SQL, application) == [job_id]
+    assert matches(conn, BLOCKING_SQL, application) == []
+
+
+def test_the_warning_does_not_prevent_a_decision(conn, application):
+    """The half that matters: warned, not stopped.
+
+    Deliberately asserts the INSERT succeeds rather than that no exception is
+    raised in the page, because the database is what decides this.
+    """
+    decide(conn, application, outcome="referred")
+    queue_retrying_job(conn, application)
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into decisions
+                (application_id, outcome, decided_by, reason,
+                 risk_score_at_decision, risk_ruleset_version_at_decision)
+            values (%s, 'approved', 'staff:alice', 'Decided with the retry noted.',
+                    30, %s)
+            """,
+            (application, RULESET_VERSION),
+        )
+        cur.execute(
+            """select count(*) from decisions
+                where application_id = %s and decided_by like 'staff:%%'""",
+            (application,),
+        )
+        assert cur.fetchone()[0] == 1
+
+
+def test_a_parked_job_raises_the_block_and_not_the_warning(conn, application):
+    """The other branch, so the two cannot quietly become the same condition."""
+    decide(conn, application, outcome="referred")
+    job_id = park_screening_job(conn, application)
+
+    assert matches(conn, BLOCKING_SQL, application) == [job_id]
+    assert matches(conn, WARNING_SQL, application) == []
+
+
+def test_a_clean_case_raises_neither(conn, application):
+    """The counterweight: no job, no warning, no block, form shown."""
+    decide(conn, application, outcome="referred")
+
+    assert matches(conn, BLOCKING_SQL, application) == []
+    assert matches(conn, WARNING_SQL, application) == []
+
+
+def test_a_succeeded_job_raises_neither(conn, application):
+    """'done' with no error is the ordinary end state and must be silent."""
+    decide(conn, application, outcome="referred")
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into jobs (job_type, payload, status)
+            values ('screening.run', %s, 'done')
+            """,
+            (Jsonb({"application_id": str(application)}),),
+        )
+
+    assert matches(conn, BLOCKING_SQL, application) == []
+    assert matches(conn, WARNING_SQL, application) == []

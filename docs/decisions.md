@@ -2971,3 +2971,107 @@ table, a migration that moves where the authoritative assessment lives, a change
 to every read of `applications.risk_*`, and a page change. Doing it inside a
 change whose purpose was to *stop* decisions drifting would have been the same
 mistake in a different direction.
+
+## The country list in ruleset 2026-09-1 was invented, not sourced
+
+This needs saying plainly, because the repository spent a week implying
+otherwise.
+
+When the scoring module was built in Phase 5 (commit 4910619, 17 September
+2026), it shipped two FATF country lists under this comment:
+
+```
+#: FATF listings, as at 2026-09. MUST be re-checked against fatf-gafi.org
+#: before any real use — this is a legal list with a publication date, not a
+#: constant.
+```
+
+The comment is scrupulous about the general risk and silent about the specific
+fact: **those codes were written from memory.** They were never fetched from
+fatf-gafi.org, never cited to a plenary statement, never checked against
+anything. "As at 2026-09" implied a currency the list never had. The warning to
+re-check before real use read as ordinary caution about a list going stale,
+rather than as what it actually was — a list that had no source to go stale
+from.
+
+It could not have been real. The increased-monitoring set held Monaco,
+grey-listed at the June 2024 plenary, beside Türkiye and the United Arab
+Emirates, de-listed at that same plenary and in February 2024 respectively. FATF
+has never published that combination. The call-for-action set, IR/KP/MM, happens
+to be correct — it has been those three since Myanmar was added in October 2022
+— but it was not sourced either, and being accidentally right is not the same as
+being checked.
+
+It stood from 17 September until 24 September, when it was finally compared
+against the source and replaced wholesale by ruleset `2026-09-2`.
+
+**Every decision in this database carries ruleset `2026-09-1`.** All 915 of them
+were scored against an unsourced country list. Nothing has been changed about
+those decision rows, and nothing should be: they record what they were actually
+scored against, which is the only thing a decision record is for. What has
+changed is that the `rulesets` table now says so, in the row's `change_note` and
+in a `sourcing: "unsourced"` flag on the reference data itself, so that anyone
+reading a decision can find out without reading this file.
+
+The synthetic-data disclaimer does not cover this. The applicants are invented on
+purpose and say so everywhere. The country list was invented by accident, and
+presented as a legal reference.
+
+### What it cost, and what it would have cost
+
+In this demo: nothing, because the applicants are fictional. The honest version
+of the sentence is that the mechanism for noticing did not exist until something
+went looking. The scoring ruleset was versioned carefully from the start, and the
+reference data it read was not versioned at all — that asymmetry is what
+migration 024 closes, and the reason the fix is a table rather than a corrected
+constant.
+
+In a real book, 13 countries were being flagged that should not have been and 14
+were being missed. Both directions are wrong and the second is the dangerous one.
+
+---
+
+## A one-time checksum refresh, and why it does not generalise
+
+`db/migrate.py` records a checksum for every applied migration and refuses to run
+when a file on disk no longer matches what was applied. Migration 007 states the
+rule the check enforces: *"editing an applied migration is how a database and a
+repository start silently disagreeing. The history of the schema follows the same
+rule as the audit log — you correct it by adding, never by rewriting."*
+
+Migrations 020 to 024 were edited after being applied, and their recorded
+checksums were refreshed rather than corrected by adding a new migration. Twice:
+once to put the deployment ordering into the headers, once to replace ruleset
+`2026-09-1`'s provenance text with the blunt version above.
+
+**Why that was acceptable here, specifically:**
+
+- `origin/master` was still at commit `f15c7dc` when it happened. The five
+  commits carrying 020–024 had not been pushed, so no other clone contained the
+  files, let alone had applied them.
+- No Neon credentials exist on this machine — `.env` points at `localhost:5434`
+  and `.env.local` holds only a Vercel OIDC token — so they could not have been
+  applied to the deployed database even by accident.
+- Nothing applies migrations automatically to a deployed database. The only
+  `migrate.py up` invocations outside a developer's hands are the two in
+  `.github/workflows/tests.yml`, and both target the workflow's own ephemeral
+  `postgres:16` service container. `vercel.json` has no build or release hook;
+  Vercel deploys never migrate.
+- The only databases they had reached were on this machine: `kyc`, `kyc_test`
+  and a couple of scratch databases since dropped.
+
+So there was no deployed database for the repository to disagree with, which is
+the entire failure the checksum guards against.
+
+**What does not follow.** Once a migration has been applied anywhere that is not
+a developer's laptop, it is frozen, and a wrong comment is corrected by a new
+migration — a worse-looking repository and a database nobody has to wonder
+about. The checksum existing is what made this a deliberate exception rather
+than an unnoticed drift, which is the argument for having it.
+
+One consequence worth recording, because it bit immediately: `rulesets` is
+append-only by its own triggers, so correcting that provenance text could not be
+done with an UPDATE even locally. The table had to be dropped and the migration
+re-applied. After deployment that option is gone too, and correcting a
+provenance text would mean recording a new ruleset version — which is the cost
+the immutability is supposed to impose, and the reason it is worth having.

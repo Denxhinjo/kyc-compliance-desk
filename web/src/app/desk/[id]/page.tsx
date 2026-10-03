@@ -78,6 +78,12 @@ interface StuckJob {
   updated_at: string;
 }
 
+interface RetryingJob {
+  id: string;
+  last_error: string | null;
+  run_after: string;
+}
+
 export default async function CasePage({
   params,
 }: {
@@ -94,6 +100,7 @@ export default async function CasePage({
     snapshotResult,
     auditResult,
     stuckResult,
+    retryingResult,
   ] = await Promise.all([
     pool.query<Application>(
       `select id, status, full_name, date_of_birth::text, address_line1,
@@ -155,11 +162,33 @@ export default async function CasePage({
         order by id`,
       [id],
     ),
+    // Screening work that failed and is still retrying.
+    //
+    // 'queued' with a last_error means an attempt failed and another is
+    // scheduled. It may yet succeed, so migration 023 does NOT block a decision
+    // on it — blocking on 'queued' would freeze the desk for every transient
+    // blip, including first deliveries about to succeed.
+    //
+    // But for a referred case the retry is likely to be carrying evidence the
+    // freeze will refuse, in which case it will exhaust its attempts and park.
+    // The officer should know that before signing off, which is why the page
+    // warns on the broader condition than the database refuses on.
+    pool.query<RetryingJob>(
+      `select id::text, last_error, run_after::text
+         from jobs
+        where job_type = 'screening.run'
+          and status = 'queued'
+          and last_error is not null
+          and payload->>'application_id' = $1
+        order by id`,
+      [id],
+    ),
     ]);
 
   const application = appResult.rows[0];
   const snapshot = snapshotResult.rows[0];
   const stuckJobs = stuckResult.rows;
+  const retryingJobs = retryingResult.rows;
   if (!application) notFound();
 
   const verdict = decisionResult.rows.find(
@@ -431,7 +460,36 @@ export default async function CasePage({
               </p>
             </div>
           ) : (
-            <DecisionForm applicationId={application.id} />
+            <>
+              {retryingJobs.length > 0 && (
+                /* A WARNING, NOT A BLOCK.
+                   The job may still succeed, so the database permits this
+                   decision and so does this page. What the officer gets is the
+                   knowledge that evidence may still be arriving — which is the
+                   whole difference between a judgement call and an accident. */
+                <div className="notice" data-testid="evidence-retrying">
+                  <p>
+                    <strong>Screening is retrying for this applicant.</strong>{" "}
+                    An attempt failed and another is scheduled, so evidence may
+                    still be arriving. You can decide now; it is worth knowing
+                    that you are deciding before that finishes.
+                  </p>
+                  <dl className="facts">
+                    {retryingJobs.map((job) => (
+                      <Fragment key={job.id}>
+                        <dt>Job</dt>
+                        <dd className="mono">#{job.id}</dd>
+                        <dt>Next try</dt>
+                        <dd className="mono dim">{job.run_after.slice(0, 16)}</dd>
+                        <dt>Last error</dt>
+                        <dd className="mono dim">{job.last_error ?? "—"}</dd>
+                      </Fragment>
+                    ))}
+                  </dl>
+                </div>
+              )}
+              <DecisionForm applicationId={application.id} />
+            </>
           )}
         </section>
       </div>
