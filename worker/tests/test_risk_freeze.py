@@ -293,3 +293,156 @@ def test_a_decision_written_by_the_worker_carries_its_ruleset_version(conn, appl
         "the decision must record the ruleset version it was taken under; "
         "without it the row depends on applications still saying what it said"
     )
+
+
+# ---------------------------------------------------------------------------
+# Migration 023: no officer decision while evidence is stuck
+# ---------------------------------------------------------------------------
+
+
+def park_screening_job(conn, application_id, error="boom") -> int:
+    """A parked screening.run job, shaped exactly as fail_job leaves one."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into jobs (job_type, payload, status, last_error)
+            values ('screening.run', %s, 'parked', %s)
+            returning id
+            """,
+            (Jsonb({"application_id": str(application_id)}), error),
+        )
+        return cur.fetchone()[0]
+
+
+def test_an_officer_cannot_decide_while_screening_evidence_is_parked(conn, application):
+    """The interim guard.
+
+    A parked screening.run means the system found something it could not write
+    down — migration 020 refuses to overwrite the evidence a referral was made
+    on, so the job raises and parks. Deciding now would be deciding without it.
+    """
+    decide(conn, application, outcome="referred")
+    job_id = park_screening_job(conn, application)
+
+    with pytest.raises(psycopg.errors.RestrictViolation) as excinfo:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    insert into decisions
+                        (application_id, outcome, decided_by, reason,
+                         risk_score_at_decision, risk_ruleset_version_at_decision)
+                    values (%s, 'approved', 'staff:alice', 'Looks fine to me.',
+                            30, '2026-09-2')
+                    """,
+                    (application,),
+                )
+    assert "could not be recorded" in str(excinfo.value)
+    assert str(job_id) in str(excinfo.value)
+
+
+def test_the_automatic_path_is_not_blocked_by_a_parked_job(conn, application):
+    """The exemption, and why it is not an oversight.
+
+    A parked job on an application with no decision yet would otherwise stop the
+    worker recording the screening that just succeeded. The system writing down
+    what it found is never what this rule wants to prevent; a human signing off
+    over unrecorded evidence is.
+    """
+    park_screening_job(conn, application)
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into decisions
+                (application_id, outcome, decided_by, reason,
+                 risk_score_at_decision, risk_ruleset_version_at_decision)
+            values (%s, 'referred', 'system', 'Score 45: sanctions near-match.',
+                    45, '2026-09-2')
+            """,
+            (application,),
+        )
+        cur.execute(
+            "select count(*) from decisions where application_id = %s", (application,)
+        )
+        assert cur.fetchone()[0] == 1
+
+
+def test_an_officer_can_decide_normally_when_nothing_is_parked(conn, application):
+    """The normal path — the counterweight.
+
+    Without this, a guard that refused every officer decision would satisfy the
+    test above while making the desk useless.
+    """
+    decide(conn, application, outcome="referred")
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into decisions
+                (application_id, outcome, decided_by, reason,
+                 risk_score_at_decision, risk_ruleset_version_at_decision)
+            values (%s, 'approved', 'staff:alice', 'Different date of birth.',
+                    30, '2026-09-2')
+            """,
+            (application,),
+        )
+        cur.execute(
+            """select count(*) from decisions
+                where application_id = %s and decided_by like 'staff:%%'""",
+            (application,),
+        )
+        assert cur.fetchone()[0] == 1
+
+
+def test_a_job_that_is_merely_retrying_does_not_block_the_desk(conn, application):
+    """'queued' is not 'parked', and the difference is deliberate.
+
+    A retrying job goes back to 'queued' with last_error set. Blocking on that
+    would freeze the desk for every transient blip, including first deliveries
+    about to succeed. The documented cost is a window: a job carrying new
+    evidence that has not parked yet. The case view warns on the broader
+    condition; the database refuses only on the unambiguous one.
+    """
+    decide(conn, application, outcome="referred")
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into jobs (job_type, payload, status, last_error)
+            values ('screening.run', %s, 'queued', 'transient')
+            """,
+            (Jsonb({"application_id": str(application)}),),
+        )
+        cur.execute(
+            """
+            insert into decisions
+                (application_id, outcome, decided_by, reason,
+                 risk_score_at_decision, risk_ruleset_version_at_decision)
+            values (%s, 'approved', 'staff:alice', 'Nothing blocking this.',
+                    30, '2026-09-2')
+            """,
+            (application,),
+        )
+
+
+def test_a_parked_job_for_a_different_application_is_irrelevant(conn, application):
+    """The predicate reads the payload, so it had better read it correctly."""
+    decide(conn, application, outcome="referred")
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into jobs (job_type, payload, status, last_error)
+            values ('screening.run', %s, 'parked', 'someone else')
+            """,
+            (Jsonb({"application_id": str(uuid.uuid4())}),),
+        )
+        cur.execute(
+            """
+            insert into decisions
+                (application_id, outcome, decided_by, reason,
+                 risk_score_at_decision, risk_ruleset_version_at_decision)
+            values (%s, 'approved', 'staff:alice', 'Not my parked job.',
+                    30, '2026-09-2')
+            """,
+            (application,),
+        )

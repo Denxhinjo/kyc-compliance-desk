@@ -2805,3 +2805,169 @@ and an ambiguous pin is not a pin.
 Nothing rewrote those rows. They still read `2026-09-1`, they were scored
 against the `2026-09-1` list, and that statement remains true — which is the
 whole point of pinning rather than backfilling.
+
+## Making a past decision reconstructable: freezing its inputs
+
+The system stored a ruleset version on every scored application and a score on
+every decision, which looked like enough to answer "what was this decided
+under?" It was not, for a reason that only shows up when you try to break it.
+
+### The question that started it
+
+`decisions` stores `risk_score_at_decision` because, as migration 004 puts it,
+"an auditor asking why was this approved in March needs March's number, not
+today's recalculation." The ruleset version was not stored there. It lived on
+the application — one column of a row that goes on changing.
+
+So: could that column change after the decision was taken? Migration 017's
+lifecycle trigger guards `status`, and says plainly that it returns early when
+status is unchanged, because writing a risk score is not a transition.
+
+Measured against the development database, in a transaction that was rolled
+back, on an application at status `decided`:
+
+```
+risk_ruleset_version   -> SUCCEEDED
+risk_score             -> SUCCEEDED
+risk_signals           -> SUCCEEDED
+status (control)       -> REJECTED: decided -> screening
+```
+
+The control is the part that matters. 017's trigger was active throughout; it
+simply had nothing to say about those columns.
+
+### The reachable path was not the obvious one
+
+An application at `decided` being re-scored is easy to imagine and no code path
+reaches it — `run_screening` returns early unless status is `screening`.
+
+The reachable case is a **referral**. A `review` routing writes a decision row
+with outcome `referred` and *deliberately* leaves the application at
+`screening`, because a referral is a decision about process rather than about
+the applicant. But `run_screening`'s only guard is `status == 'screening'`,
+which those cases satisfy, and jobs are at-least-once. A redelivered
+`screening.run` therefore re-enters `_store_assessment`, whose UPDATE carried no
+status predicate, and rewrites all three columns. `_route` then sees the
+existing referral and returns without a second decision row.
+
+The referral keeps the score it was made on while the application's inputs are
+replaced underneath it. Nineteen applications were in that state. One, a UAE
+applicant, would re-score 60 to 45, because the UAE left the FATF
+increased-monitoring list between ruleset `2026-09-1` and `2026-09-2`.
+
+### A trigger, not a WHERE clause
+
+Adding `and status = 'screening'` to that one UPDATE would have worked. It would
+also have been a rule enforced by a WHERE clause in one function in one
+language — the duplicated-convention arrangement migration 017 was written to
+remove. The schema is shared by TypeScript and Python and owned by neither, so
+migration 020 states the rule once and `screening_handler.py` is left unchanged.
+
+It keys on **the existence of a decision row**, not on `status = 'decided'`.
+Those are different sets, and the difference is the whole point: keying on
+status would have closed the case no code can reach and left open the one a
+redelivered job reaches by design.
+
+### The backfill is verified rather than assumed
+
+Migration 021 adds `decisions.risk_ruleset_version_at_decision` and copies the
+application's version onto existing rows — but only where `risk_scored_at <=
+decided_at`. A score written *after* its decision cannot be trusted to be the
+one the decision was made on, so those rows are left NULL, as are rows with no
+`risk_scored_at` at all. NULL means "not established from the data", which is
+true; a filled-in value that might be wrong is not, and would defeat the column.
+
+On this database that excluded nothing: 915 of 915 filled. The gate stays in the
+migration anyway, because it also runs against the deployed database.
+
+What the evidence does not cover is worth stating: `risk_scored_at` only moves
+when the scoring code writes it. A direct `update applications set
+risk_ruleset_version = ...` in psql would change the version and leave that
+timestamp untouched, and the backfill would copy the new value believing it to
+be the old one. `audit_events` corroborates — it is append-only, and no
+application carries more than one `screening.completed` row or any dated after
+its decision — but corroboration is not proof. The claim is "consistent with
+every record the system kept", not "certain".
+
+### And then the database says it, not four callers
+
+Four sites insert decisions: the worker, the officer's action in the web app,
+the seeder and a smoke script. Teaching all four to populate the new column
+works until someone adds a fifth, so migration 022 adds a CHECK.
+
+It is `NOT VALID`, and that is load-bearing rather than a convenience. NOT VALID
+enforces the constraint on every new row and does not scan the existing ones —
+which is exactly what 021's backfill needs, because a validating constraint
+would force the deliberately-NULL rows to be filled with a guess.
+
+It matters most for the officer's path, which has **no automated test**: `/web`
+has a typechecker and no test runner. For that site the constraint is the test.
+
+### The gap the freeze opened, and the interim guard
+
+Freezing the columns stops the drift. It does not stop the evidence arriving.
+
+A redelivered `screening.run` can carry genuinely new evidence, by two routes.
+`active_snapshot()` returns the newest fully-loaded sanctions list rather than
+the one the referral was made against, so a reload can surface entities that did
+not exist before. And `Approved`, `Declined`, `Abandoned`, `Expired` and `Kyc
+Expired` all map to lifecycle `screening`, so a corrected vendor result on a
+referred case writes `vendor_status` without changing status and enqueues a
+re-screen — `Declined -> Approved` moves the document component by 40 points.
+
+With the freeze in place that job raises, retries and parks. Because `run_once`
+wraps the handler in one transaction, the matches roll back with the assessment:
+nothing is written and nothing is corrupted. But nothing is **recorded** either.
+The new evidence sits in a parked job where no officer will see it.
+
+Migration 023 is the interim answer: an officer may not record a decision while a
+`screening.run` job for that application is parked, and the case view says why.
+Automatic decisions are exempt, because a parked job on an application with no
+decision yet would otherwise stop the worker recording the screening that just
+succeeded — the system writing down what it found is never what this rule wants
+to prevent.
+
+It blocks on `parked` only. The jobs table has no `failed` status; a retrying job
+returns to `queued` with `last_error` set. That leaves a window — a job carrying
+new evidence that has not parked yet — bounded by `max_attempts` and the backoff
+schedule, and for a frozen referred case parking is deterministic rather than
+likely. Blocking on `queued` instead would freeze the desk for every transient
+blip, trading a narrow window for a broad outage.
+
+---
+
+## Proposed: superseding assessments, not frozen ones
+
+**Status: proposed, not built.** Migration 023 is a guard, not a solution. It
+stops a decision being taken in ignorance; it does not let the new evidence
+through.
+
+The shape that fits this schema is **supersession**, the same move migration 007
+made when it stopped a referral and a verdict having to be the same row.
+
+**Keep the evidence tables accumulating.** `screening_results` is already
+append-only in practice and already carries `snapshot_id`. New matches from a
+newer list are new facts and should be written, not refused — they are already
+distinguishable by the snapshot they came from.
+
+**Append an assessment rather than editing one.** A `risk_assessments` table
+(`application_id`, `score`, `signals`, `ruleset_version`, `snapshot_id`,
+`scored_at`, `supersedes_id`), with the `applications.risk_*` columns demoted to
+a cache of the latest pre-decision assessment. A referral keeps pointing at the
+assessment it was made on; a re-score appends a new row that supersedes it
+without touching it. The freeze in 020 then protects the cache rather than
+standing in for the record.
+
+**Show the officer both.** The case view gains a "new evidence since referral"
+block: what changed, which list version or vendor result produced it, and the
+delta it would make to the score. The officer decides with the new evidence
+visible as a separate, dated record rather than as a silent replacement.
+
+**The job then succeeds.** It is appending, so there is nothing for the freeze to
+refuse, and 023's refusal stops firing because nothing parks.
+
+The reason this is a separate task rather than part of the last one: it is a new
+table, a migration that moves where the authoritative assessment lives, a change
+to every read of `applications.risk_*`, and a page change. Doing it inside a
+change whose purpose was to *stop* decisions drifting would have been the same
+mistake in a different direction.

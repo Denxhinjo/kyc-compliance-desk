@@ -1,5 +1,34 @@
 -- 020: a scored application stops being re-scorable once it has been decided.
 --
+-- DEPLOYMENT ORDER — THIS MIGRATION GOES LAST
+--
+-- These four migrations are not interchangeable and applying them in file order
+-- would break the deployed site. The sequence is:
+--
+--   1. 021  adds decisions.risk_ruleset_version_at_decision (nullable) and
+--           backfills it. Safe against the currently deployed code, which does
+--           not know the column exists.
+--
+--   2. DEPLOY the updated worker and web code. From here on both decision
+--      paths populate the new column.
+--
+--   3. 022  requires the column on new rows. Applying this BEFORE step 2 would
+--           make every officer decision fail, because the deployed web code
+--           would still be inserting without it.
+--
+--   4. 023  refuses an officer's decision while a screening job is parked, and
+--           the case view explains why. Needs the web code from step 2, or an
+--           officer meets a database error with nothing to read.
+--
+--   5. 020  this file, the freeze. It goes last because it is what CAUSES jobs
+--           to park: once risk columns are frozen, a redelivered screening job
+--           carrying new evidence raises instead of writing. Applying it before
+--           023 and its page changes means jobs start parking while nothing in
+--           the interface accounts for them, and an officer could decide a case
+--           whose new evidence was silently stuck in a failed job.
+--
+-- The same order is in docs/deploy.md, which is where it is actually read.
+--
 -- THE HOLE THIS CLOSES
 --
 -- Migration 017 moved the lifecycle into the schema so that "you may not decide

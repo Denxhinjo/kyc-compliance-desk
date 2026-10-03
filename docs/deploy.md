@@ -258,3 +258,55 @@ git commit --allow-empty -m "check vercel root directory" && git push
 If step 2 returns 404 after a push, the root directory did not stick.
 Disconnect Git again and fall back to the CLI — the site works either way, and
 a manual deploy is a smaller problem than a silently empty one.
+
+---
+
+## Applying migrations 020–023 to Neon
+
+**File order is not deployment order.** Applying these in numeric order breaks
+the live site. Four of them interact, and two of them change behaviour the
+deployed code has to be ready for.
+
+| # | Step | Why it cannot move |
+| --- | --- | --- |
+| 1 | `021` — add `decisions.risk_ruleset_version_at_decision`, backfill | Nullable column, no default: a catalogue change, not a table rewrite. Safe against the code already deployed, which does not know it exists. |
+| 2 | **Deploy the worker and web code** | From here both decision paths populate the column. |
+| 3 | `022` — require the column on new rows | Before step 2 this makes **every officer decision fail**, because the deployed web code still inserts without it. |
+| 4 | `023` — refuse decisions while screening evidence is parked | Needs the case-view changes from step 2, or an officer meets a database error with nothing to read. |
+| 5 | `020` — freeze risk columns after a decision | **Last.** This is what causes jobs to park. Before 023 is live, jobs would start parking while nothing in the interface accounts for them. |
+
+### Before you start
+
+`021`'s backfill only fills rows it can verify — where `risk_scored_at <=
+decided_at`. Everything else is left NULL on purpose. Run this first to see what
+Neon will actually do, read-only:
+
+```sql
+select
+  (select count(*) from decisions)                                                    as total,
+  (select count(*) from decisions d join applications a on a.id = d.application_id
+    where a.risk_scored_at is not null and a.risk_scored_at <= d.decided_at)          as would_backfill,
+  (select count(*) from decisions d join applications a on a.id = d.application_id
+    where a.risk_scored_at > d.decided_at)                                            as null_scored_after,
+  (select count(*) from decisions d join applications a on a.id = d.application_id
+    where a.risk_scored_at is null)                                                   as null_never_scored,
+  (select count(*) from applications a join decisions d on d.application_id = a.id
+    where a.status = 'screening' and d.outcome = 'referred')                          as referred_pending;
+```
+
+`referred_pending` is the number to look at before step 5. Those are the cases
+that can start parking jobs once the freeze is on.
+
+`db/migrate.py` prints each migration's own `RAISE NOTICE` lines, so `021`
+reports its backfill counts as it runs — no need to reach for `psql` to see
+them.
+
+### If something is already wrong
+
+A decision that fails with `decisions_ruleset_version_present` means 022 was
+applied before the code deploy. Deploy the code; nothing needs undoing.
+
+A parked `screening.run` job is not an error to clear blindly — it means
+screening found something it could not record. See
+`023_no_decision_while_evidence_is_stuck.sql` and the "superseding assessments"
+proposal in `decisions.md`.

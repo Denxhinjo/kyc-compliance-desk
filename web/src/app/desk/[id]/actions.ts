@@ -17,6 +17,11 @@ const MIN_REASON_LENGTH = 15;
 
 /** Postgres unique-violation. The backstop that makes deciding twice impossible. */
 const UNIQUE_VIOLATION = "23505";
+//: Raised by the lifecycle guard (017), the risk freeze (020) and the
+//: stuck-evidence guard (023). Here it can only be 023: the other two are
+//: triggers on applications, and this transaction updates status only
+//: after the decision row is in.
+const RESTRICT_VIOLATION = "23001";
 
 export async function decide(
   _previous: DecideState,
@@ -84,6 +89,31 @@ export async function decide(
       );
       if (existing.rows.length > 0) {
         return { alreadyDecidedBy: existing.rows[0].decided_by } as DecideState;
+      }
+
+      // Evidence the system could not record.
+      //
+      // Migration 023 refuses this insert outright, so the check here is not
+      // the guarantee — it exists so the officer gets a sentence rather than a
+      // database error. Read inside the same transaction and after the lock,
+      // for the same reason the decision check is: anything read before the
+      // lock is a guess about a row someone else may be changing.
+      const stuck = await client.query<{ id: string }>(
+        `select id::text from jobs
+          where job_type = 'screening.run'
+            and status = 'parked'
+            and payload->>'application_id' = $1
+          limit 1`,
+        [applicationId],
+      );
+      if (stuck.rows.length > 0) {
+        return {
+          error:
+            "Screening ran again for this applicant and could not record what " +
+            `it found (job #${stuck.rows[0].id}). The evidence in front of you ` +
+            "may be incomplete, so this case cannot be decided until someone " +
+            "has looked at that job.",
+        } as DecideState;
       }
 
       // The ruleset version alongside the score, for the same reason: a
@@ -159,6 +189,21 @@ export async function decide(
       (err as { code?: string }).code === UNIQUE_VIOLATION
     ) {
       return { alreadyDecidedBy: "another officer" };
+    }
+    // The same backstop for migration 023. The pre-check above returns a
+    // sentence in the ordinary case; this catches the race where a screening
+    // job parks between that read and this insert, so the officer still gets an
+    // explanation rather than a 500.
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      (err as { code?: string }).code === RESTRICT_VIOLATION
+    ) {
+      return {
+        error:
+          "Screening evidence for this applicant could not be recorded, so " +
+          "this case cannot be decided yet. Reload to see the details.",
+      };
     }
     throw err;
   }

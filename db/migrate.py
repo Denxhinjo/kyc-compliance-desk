@@ -226,8 +226,24 @@ def cmd_up(conn: psycopg.Connection, dry_run: bool) -> int:
         print("\n(dry run — nothing was changed)")
         return 0
 
+    # Surface RAISE NOTICE from the migrations themselves.
+    #
+    # psycopg 3 has no `.notices` list; notices arrive through a handler. One is
+    # registered here for the whole run and the list is emptied per migration,
+    # rather than attaching and detaching a handler each time — handlers live on
+    # the connection and removing one means reaching into private state.
+    #
+    # Worth doing because a migration's own report is otherwise invisible:
+    # migration 021 counts how many decision rows its backfill could and could
+    # not establish a ruleset version for, which is the entire point of that
+    # migration, and until now the only way to read those counts was to re-run
+    # it by hand in psql.
+    notices: list[str] = []
+    conn.add_notice_handler(lambda diag: notices.append(diag.message_primary or ""))
+
     for migration in pending:
         print(f"applying {migration.filename} ... ", end="", flush=True)
+        notices.clear()
         try:
             # Postgres has TRANSACTIONAL DDL: CREATE TABLE, ALTER and INSERT
             # can share one transaction and roll back together. Many databases
@@ -251,6 +267,8 @@ def cmd_up(conn: psycopg.Connection, dry_run: bool) -> int:
                 print(f"SQLSTATE: {err.diag.sqlstate}")
             return 1
         print("ok")
+        for text in notices:
+            print(f"    {text}")
 
     print(f"\nApplied {len(pending)} migration(s).")
     return 0

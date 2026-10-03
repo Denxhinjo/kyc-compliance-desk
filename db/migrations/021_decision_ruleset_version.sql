@@ -1,5 +1,9 @@
 -- 021: record the ruleset version ON the decision, not only on the application.
 --
+-- DEPLOYMENT ORDER: not file order. 021, then deploy the code, then 022, then
+-- 023, then 020 last. The reasoning is in the header of
+-- 020_freeze_risk_after_decision.sql and in docs/deploy.md.
+--
 -- WHY THE APPLICATION'S COPY IS NOT ENOUGH
 --
 -- decisions already stores risk_score_at_decision, for the reason migration 004

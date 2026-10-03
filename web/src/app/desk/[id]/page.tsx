@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { pool } from "@/lib/db";
@@ -71,6 +72,12 @@ interface AuditRow {
   details: Record<string, unknown>;
 }
 
+interface StuckJob {
+  id: string;
+  last_error: string | null;
+  updated_at: string;
+}
+
 export default async function CasePage({
   params,
 }: {
@@ -80,8 +87,14 @@ export default async function CasePage({
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
 
-  const [appResult, matchResult, decisionResult, snapshotResult, auditResult] =
-    await Promise.all([
+  const [
+    appResult,
+    matchResult,
+    decisionResult,
+    snapshotResult,
+    auditResult,
+    stuckResult,
+  ] = await Promise.all([
     pool.query<Application>(
       `select id, status, full_name, date_of_birth::text, address_line1,
               address_line2, address_city, address_postcode, address_country,
@@ -122,10 +135,31 @@ export default async function CasePage({
          from audit_events where application_id = $1 order by id`,
       [id],
     ),
+    // Screening work that failed for good and was parked.
+    //
+    // A parked screening.run is the system saying it found something it could
+    // not write down — a newer sanctions list, or a corrected vendor result
+    // that would move the score. Migration 020 freezes the risk columns once a
+    // decision row exists, so on a referred case that job raises and parks
+    // rather than overwriting the evidence the referral was made on.
+    //
+    // Migration 023 refuses an officer's decision while one of these exists.
+    // This query is what lets the page say so instead of the officer meeting a
+    // database error with no explanation.
+    pool.query<StuckJob>(
+      `select id::text, last_error, updated_at::text
+         from jobs
+        where job_type = 'screening.run'
+          and status = 'parked'
+          and payload->>'application_id' = $1
+        order by id`,
+      [id],
+    ),
     ]);
 
   const application = appResult.rows[0];
   const snapshot = snapshotResult.rows[0];
+  const stuckJobs = stuckResult.rows;
   if (!application) notFound();
 
   const verdict = decisionResult.rows.find(
@@ -358,6 +392,42 @@ export default async function CasePage({
               <p className="reason-quote">{verdict.reason}</p>
               <p className="dim small">
                 Decided cases cannot be decided again. The record is closed.
+              </p>
+            </div>
+          ) : stuckJobs.length > 0 ? (
+            /* New evidence arrived and could not be recorded.
+               The database refuses this decision (migration 023), so the form
+               is replaced rather than merely annotated — offering buttons that
+               are guaranteed to fail would be worse than offering none. The
+               reason is shown in full, because an officer who cannot decide and
+               cannot see why is worse off than one who simply cannot decide. */
+            <div className="notice">
+              <p>
+                <strong>This case cannot be decided yet.</strong> Screening ran
+                again for this applicant and could not record what it found, so
+                the evidence in front of you may be incomplete.
+              </p>
+              <p className="dim small">
+                That happens when something changed since the referral — a newer
+                sanctions list, or a corrected result from the identity vendor.
+                The earlier evidence is deliberately not overwritten, which is
+                why the new result had nowhere to go.
+              </p>
+              <dl className="facts">
+                {stuckJobs.map((job) => (
+                  <Fragment key={job.id}>
+                    <dt>Job</dt>
+                    <dd className="mono">#{job.id}</dd>
+                    <dt>Failed</dt>
+                    <dd className="mono dim">{job.updated_at.slice(0, 16)}</dd>
+                    <dt>Error</dt>
+                    <dd className="mono dim">{job.last_error ?? "—"}</dd>
+                  </Fragment>
+                ))}
+              </dl>
+              <p className="dim small">
+                Someone needs to look at the parked job before this case is
+                decided. Deciding now would be deciding without it.
               </p>
             </div>
           ) : (

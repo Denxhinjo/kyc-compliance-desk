@@ -1,5 +1,9 @@
 -- 022: every NEW decision must say which ruleset it was taken under.
 --
+-- DEPLOYMENT ORDER: not file order. 021, then deploy the code, then 022, then
+-- 023, then 020 last. The reasoning is in the header of
+-- 020_freeze_risk_after_decision.sql and in docs/deploy.md.
+--
 -- WHY A CONSTRAINT RATHER THAN FOUR CODE CHANGES
 --
 -- Migration 021 added the column and the four sites that insert decisions were
