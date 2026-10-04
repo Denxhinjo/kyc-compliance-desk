@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import os
 
+import http.client
 import urllib.error
 import urllib.request
 import uuid
@@ -93,12 +94,64 @@ FORBIDDEN_TOKENS = (
 FORBIDDEN_KEYS = ('"score"', '"reasons"', '"routing"', '"candidates"')
 
 
-def fetch(path: str) -> tuple[int, str]:
+class Unreachable(RuntimeError):
+    """The page could not be examined. NOT a disclosure finding.
+
+    The distinction this class exists to make is the whole point of the file.
+    Twice now an orphaned `next dev` process has held port 3001 with its render
+    workers dead, answering every page with HTTP 500. The tests below then
+    failed — and they failed looking exactly like a status-page regression,
+    because an assertion about a page body cannot tell "I read the page and
+    found a leak" from "there was no page to read".
+
+    That ambiguity is dangerous in the direction it now runs. Having been
+    fooled twice, the cheap explanation next time is "probably the orphan
+    again", and that is how a genuine leak ships.
+
+    So the ambiguity is removed mechanically rather than remembered: anything
+    that is not a response whose body we expected to be able to read raises
+    this, and it is routed to unavailable() — a skip locally, a loud failure
+    under STRICT_DISCLOSURE_TEST. Neither of those is a disclosure failure.
+    A disclosure failure can now only come from an assertion against bytes the
+    test actually received.
+    """
+
+
+def fetch(path: str, *, allow: tuple[int, ...] = (200,)) -> tuple[int, str]:
+    """GET a page, or explain why it could not be read.
+
+    `allow` is the set of statuses this caller is prepared to reason about.
+    Anything else — a transport error, a 5xx, or a status the caller did not
+    expect — means the page was not examined, and raises Unreachable rather
+    than returning something an assertion would then misread.
+    """
     request = urllib.request.Request(
         f"{BASE_URL}{path}", headers={"User-Agent": "kyc-disclosure-test"}
     )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        return response.status, response.read().decode("utf-8", "replace")
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            status = response.status
+            body = response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as err:
+        # An HTTP error still carries a body, and for an expected status such
+        # as 404 that body is exactly what we want to inspect.
+        status = err.code
+        body = err.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError, http.client.HTTPException) as err:
+        raise Unreachable(f"no response for {path} from {BASE_URL}: {err}") from None
+
+    if status >= 500:
+        raise Unreachable(
+            f"{path} returned HTTP {status} — the server failed to render it, "
+            "so nothing was disclosed or withheld. This is usually a dev server "
+            "whose render workers have died while the port stays open."
+        )
+    if status not in allow:
+        raise Unreachable(
+            f"{path} returned HTTP {status}; this check can only read "
+            f"{', '.join(str(code) for code in allow)}."
+        )
+    return status, body
 
 
 @pytest.fixture(scope="module")
@@ -106,8 +159,8 @@ def web_service():
     """Skip the module unless the web app is actually up."""
     try:
         fetch("/")
-    except (urllib.error.URLError, OSError) as err:
-        unavailable(f"web service not reachable at {BASE_URL}: {err}")
+    except Unreachable as err:
+        unavailable(str(err))
     return BASE_URL
 
 
@@ -197,7 +250,10 @@ def test_the_status_page_reveals_no_screening_detail(
     a regression that stops rendering the data but starts serialising it still
     fails here.
     """
-    status, body = fetch(f"/status/{flagged_application}")
+    try:
+        status, body = fetch(f"/status/{flagged_application}")
+    except Unreachable as err:
+        unavailable(str(err))
     assert status == 200
 
     found = [t for t in FORBIDDEN_TOKENS if t.lower() in body.lower()]
@@ -222,7 +278,10 @@ def test_the_applicants_own_name_is_still_shown(web_service, flagged_application
     test pass — which is the classic way a security assertion quietly stops
     asserting anything.
     """
-    _, body = fetch(f"/status/{flagged_application}")
+    try:
+        _, body = fetch(f"/status/{flagged_application}")
+    except Unreachable as err:
+        unavailable(str(err))
     assert "Application started" in body, "the timeline rendered nothing at all"
     assert "Your application" in body, "the page did not render"
 
@@ -235,14 +294,15 @@ def test_the_officer_case_view_is_not_affected(web_service, flagged_application)
     auditor loses the record — so the case view is checked to still be behind
     a login rather than checked to be empty.
     """
+    permitted = (200, 302, 303, 307, 308, 401, 403)
     try:
-        status, _ = fetch(f"/desk/{flagged_application}")
-    except urllib.error.HTTPError as err:
-        status = err.code
+        status, _ = fetch(f"/desk/{flagged_application}", allow=permitted)
+    except Unreachable as err:
+        # Includes a status outside `permitted`, which is a page this check
+        # cannot reason about rather than a disclosure problem.
+        unavailable(str(err))
 
-    assert status in (200, 302, 303, 307, 308, 401, 403), (
-        f"unexpected status {status} from the desk"
-    )
+    assert status in permitted, f"unexpected status {status} from the desk"
 
 
 def test_a_status_page_for_an_unknown_application_discloses_nothing(web_service):
@@ -265,9 +325,9 @@ def test_a_status_page_for_an_unknown_application_discloses_nothing(web_service)
     child, which is more moving parts than a sub-second query deserves.
     """
     try:
-        status, body = fetch(f"/status/{uuid.uuid4()}")
-    except urllib.error.HTTPError as err:
-        status, body = err.code, err.read().decode("utf-8", "replace")
+        status, body = fetch(f"/status/{uuid.uuid4()}", allow=(200, 404))
+    except Unreachable as err:
+        unavailable(str(err))
 
     assert status == 404, (
         f"expected 404 for an application that does not exist, got {status}. "

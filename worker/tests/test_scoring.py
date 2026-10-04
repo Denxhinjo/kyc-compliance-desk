@@ -463,3 +463,42 @@ def test_the_seeders_risk_tail_comes_from_the_sourced_lists():
 
     assert set(_MONITORED_TAIL) <= set(INCREASED_MONITORING.codes)
     assert set(_CALL_FOR_ACTION_TAIL) <= set(CALL_FOR_ACTION.codes)
+
+
+def test_country_coverage_partitions_the_sourced_lists_exactly():
+    """The seeder's report must account for every sourced code.
+
+    Used plus excluded has to equal the list, or the report is telling a
+    comforting half-truth — which is the failure mode it exists to prevent.
+    """
+    from seed import country_coverage
+    from scoring import CALL_FOR_ACTION, INCREASED_MONITORING
+
+    cover = country_coverage()
+
+    assert set(cover["monitored_used"]) | set(cover["monitored_excluded"]) == set(
+        INCREASED_MONITORING.codes
+    )
+    assert not set(cover["monitored_used"]) & set(cover["monitored_excluded"])
+
+    assert set(cover["call_for_action_used"]) | set(
+        cover["call_for_action_excluded"]
+    ) == set(CALL_FOR_ACTION.codes)
+    assert not set(cover["call_for_action_used"]) & set(
+        cover["call_for_action_excluded"]
+    )
+
+
+def test_every_usable_country_really_has_address_data():
+    """The whole point of the intersection.
+
+    A code reported as usable but absent from CITIES would put its applicants
+    at the placeholder address, which is the lie the intersection was added to
+    avoid.
+    """
+    from seed import CITIES, country_coverage
+
+    cover = country_coverage()
+    for key in ("monitored_used", "call_for_action_used"):
+        for code in cover[key]:
+            assert code in CITIES, f"{code} reported usable but has no address data"

@@ -3075,3 +3075,37 @@ done with an UPDATE even locally. The table had to be dropped and the migration
 re-applied. After deployment that option is gone too, and correcting a
 provenance text would mean recording a new ruleset version — which is the cost
 the immutability is supposed to impose, and the reason it is worth having.
+
+## The recurring defect: things that look like checks and are not
+
+This project has now hit the same shape three times, in three unrelated places.
+`.env` was loaded as a side effect of importing `worker/config.py`, so whether
+`DATABASE_URL` was set depended on which modules pytest happened to collect
+first — `pytest tests/test_scoring.py` reported 64 tests green while running
+none of them. A mutation-testing run reported which tests *failed* under each
+mutant and silently ignored the ones that *errored*, so mutants that broke the
+suite outright counted as survivors. And the seeder's `Borderline` recipes each
+carried an `expected` score written in a comment beside a note explaining it;
+`score_application()` computed the real number and nobody compared the two, so
+when the FATF list changed, three recipes went on documenting 15 and 20 points
+for countries that now scored zero. In each case something produced a
+reassuring output — a green run, a survivor list, a documented number — without
+having measured the thing it appeared to be measuring. The green was not wrong
+about the tests; there simply were none. That is worse than a red build,
+because a red build gets investigated.
+
+The remedy the project now applies has two halves. **Make the documentation
+executable**: if a value is written down as fact, assert it against the computed
+one, so `expected` either matches what the rules produce or fails the build —
+which is what `test_the_borderline_recipes_document_the_score_they_actually_produce`
+does, and what the pinned digest in `test_country_lists.py` does for the
+sanctions lists. **And make a check that could not run say so, loudly, in terms
+that cannot be mistaken for a pass or for a finding.** The disclosure suite is
+the clearest version: it used to fail identically whether a page leaked or the
+dev server had died, so it now raises `Unreachable` for any transport error,
+5xx or unexpected status, and can only report a leak from bytes it actually
+read. Locally that is a skip naming the cause; under `STRICT_DISCLOSURE_TEST`
+it is a failure saying the check could not run. The underlying rule is the one
+worth carrying to other projects: *a check that cannot distinguish "I looked
+and found nothing" from "I could not look" is not a check*, and the fix is
+never to look harder — it is to make the two outcomes impossible to confuse.

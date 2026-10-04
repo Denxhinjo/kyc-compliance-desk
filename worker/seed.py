@@ -486,6 +486,58 @@ _CALL_FOR_ACTION_TAIL = sorted(set(CALL_FOR_ACTION.codes) & set(CITIES))
 COUNTRIES = _DIASPORA + _MONITORED_TAIL * 3 + _CALL_FOR_ACTION_TAIL
 
 
+def country_coverage() -> dict[str, list[str]]:
+    """Which sourced codes the seeder can and cannot place an applicant in.
+
+    The intersection above is correct and it is SILENT, which is its own
+    problem. A plenary can add a country that then never appears in the demo
+    because CITIES has no address for it, and nothing says so — a silent
+    degradation introduced by the fix for a different one, which is the pattern
+    this project keeps finding.
+
+    So the seeder reports it. Reporting rather than asserting on purpose: a
+    seed that refuses to run because the world changed is worse than a seed
+    that runs and tells you what it left out. The one case worth shouting
+    about is an EMPTY intersection, because that silently removes a whole
+    dimension of the score from the demo rather than thinning it.
+    """
+    have = set(CITIES)
+    return {
+        "monitored_used": sorted(set(INCREASED_MONITORING.codes) & have),
+        "monitored_excluded": sorted(set(INCREASED_MONITORING.codes) - have),
+        "call_for_action_used": sorted(set(CALL_FOR_ACTION.codes) & have),
+        "call_for_action_excluded": sorted(set(CALL_FOR_ACTION.codes) - have),
+    }
+
+
+def print_country_coverage() -> None:
+    """One short block at seed time, in the output a human is already reading."""
+    cover = country_coverage()
+    for label, used_key, excl_key, total in (
+        ("increased monitoring", "monitored_used", "monitored_excluded",
+         len(INCREASED_MONITORING.codes)),
+        ("call for action", "call_for_action_used", "call_for_action_excluded",
+         len(CALL_FOR_ACTION.codes)),
+    ):
+        used, excluded = cover[used_key], cover[excl_key]
+        print(
+            f"  {label:<22} {len(used)}/{total} usable"
+            f"{': ' + ' '.join(used) if used else ''}"
+        )
+        if excluded:
+            shown = " ".join(excluded[:12])
+            more = f" (+{len(excluded) - 12} more)" if len(excluded) > 12 else ""
+            print(f"    excluded, no address data: {len(excluded)} — {shown}{more}")
+        if not used:
+            # Not a failure: the seed still produces a usable book. But a demo
+            # where nobody is from a listed jurisdiction exercises none of the
+            # country scoring, and that should not be discovered later.
+            print(
+                f"    WARNING: no applicant can be placed in a {label} "
+                "jurisdiction — the country signal is untested by this data"
+            )
+
+
 STREETS = ["High Street", "Station Road", "Church Lane", "Victoria Road",
            "Mill Lane", "Bishopsgate", "Queen Street", "Park Avenue"]
 
@@ -795,6 +847,8 @@ def main() -> int:
         e for e in index.entries if is_person_name(e.name) and e.date_of_birth
     ]
     print(f"screening against the {SANCTIONS_SOURCE} list ({len(index)} entries)")
+    print("country coverage, from the sourced lists:")
+    print_country_coverage()
 
     with connect() as conn:
         with conn.cursor() as cur:
