@@ -335,6 +335,14 @@ CULTURES: dict[str, NameCulture] = {
 }
 
 COUNTRY_CULTURE = {
+    # Jurisdictions added for the FATF-listed address data below. Mapped to the
+    # nearest culture this file already models, because the alternative is the
+    # "britain" default and an applicant in Pyongyang called Oliver Smith — a
+    # tell of exactly the kind seed.py exists to avoid. VG is genuinely
+    # English-speaking, so britain is right there rather than a fallback.
+    "KP": "east_asia", "LA": "east_asia", "BG": "slavic", "MC": "france",
+    "LB": "arabic", "NP": "south_asia", "VE": "latam", "CI": "west_africa",
+    "VG": "britain",
     "GB": "britain", "IE": "britain",
     "ES": "iberia", "PT": "iberia",
     "PL": "central_europe",
@@ -461,6 +469,39 @@ CITIES = {
     "BR": [("Sao Paulo", "01310")], "ZA": [("Cape Town", "8001")],
     "NG": [("Lagos", "101001")], "TR": [("Istanbul", "34000")],
     "AE": [("Dubai", "00000")], "VN": [("Hanoi", "100000")], "IR": [("Tehran", "11369")],
+
+    # --- jurisdictions on the sourced FATF lists -----------------------------
+    #
+    # SYNTHETIC ADDRESSES, SHAPED TO LOOK PLAUSIBLE. Not verified postal data
+    # and not a claim about any country's addressing scheme. They exist so the
+    # country-risk dimension of the demo actually fires: before this, the
+    # coverage report read "increased monitoring 1/22 usable", which meant one
+    # scoring signal was being exercised by a single country.
+    #
+    # Which jurisdictions appear here is a property of THIS FILE, not of the
+    # FATF lists — membership is decided by the sourced constants in scoring.py
+    # and nothing below asserts it. These are chosen for spread of region and
+    # postcode shape, so a reader sees varied addresses rather than eight
+    # five-digit numbers.
+    #
+    # Countries with no public postal code system carry "n/a" rather than an
+    # invented code: address_postcode is NOT NULL, and a fabricated number
+    # would be a small version of exactly the defect this project keeps finding.
+
+    # All three call-for-action jurisdictions, so that path is visible at all.
+    "KP": [("Pyongyang", "n/a")],
+    "MM": [("Yangon", "11181"), ("Mandalay", "05011")],
+
+    # Eight monitored jurisdictions: Balkans, western Europe, Middle East,
+    # South Asia, South America, west Africa, the Caribbean, south-east Asia.
+    "BG": [("Sofia", "1000"), ("Plovdiv", "4000")],
+    "MC": [("Monaco", "98000")],
+    "LB": [("Beirut", "2012 3054")],
+    "NP": [("Kathmandu", "44600")],
+    "VE": [("Caracas", "1010")],
+    "CI": [("Abidjan", "n/a")],
+    "VG": [("Road Town", "VG1110")],
+    "LA": [("Vientiane", "01000")],
 }
 
 #: The higher-risk tail, DERIVED FROM THE SOURCED CONSTANTS.
@@ -484,6 +525,21 @@ _CALL_FOR_ACTION_TAIL = sorted(set(CALL_FOR_ACTION.codes) & set(CITIES))
 #: where one applicant in ten is from a call-for-action jurisdiction is not a
 #: consumer book, it is a stress test.
 COUNTRIES = _DIASPORA + _MONITORED_TAIL * 3 + _CALL_FOR_ACTION_TAIL
+
+
+#: Warn when fewer than this fraction of a sourced list can appear in the book.
+#:
+#: One third, and the number is less important than the shape of the argument.
+#: The previous trigger was zero coverage, which only fires in the case nobody
+#: would miss. It stayed silent at 1 of 22 — a country-risk signal exercised by
+#: a single jurisdiction, which is not meaningfully different from untested:
+#: every applicant who scores country points scores them for the same reason,
+#: so a rule that mishandled every OTHER listed country would pass unnoticed.
+#:
+#: A fraction rather than a count, because the lists change size. A fixed "warn
+#: below 3" would be complacent against a 40-country list and alarmist against
+#: a 3-country one — and call-for-action IS a 3-country list.
+COVERAGE_WARN_BELOW = 1 / 3
 
 
 def country_coverage() -> dict[str, list[str]]:
@@ -528,13 +584,15 @@ def print_country_coverage() -> None:
             shown = " ".join(excluded[:12])
             more = f" (+{len(excluded) - 12} more)" if len(excluded) > 12 else ""
             print(f"    excluded, no address data: {len(excluded)} — {shown}{more}")
-        if not used:
-            # Not a failure: the seed still produces a usable book. But a demo
-            # where nobody is from a listed jurisdiction exercises none of the
-            # country scoring, and that should not be discovered later.
+        fraction = len(used) / total if total else 0.0
+        if fraction < COVERAGE_WARN_BELOW:
+            # Not a failure: the seed still produces a usable book. But a
+            # dimension that barely fires is a dimension nobody is testing, and
+            # that should not be discovered by a reviewer rather than by us.
             print(
-                f"    WARNING: no applicant can be placed in a {label} "
-                "jurisdiction — the country signal is untested by this data"
+                f"    WARNING: only {len(used)} of {total} {label} "
+                f"jurisdictions can appear ({fraction:.0%}) — the country "
+                "signal is barely exercised by this data"
             )
 
 

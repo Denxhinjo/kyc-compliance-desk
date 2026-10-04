@@ -3082,9 +3082,10 @@ This project has now hit the same shape three times, in three unrelated places.
 `.env` was loaded as a side effect of importing `worker/config.py`, so whether
 `DATABASE_URL` was set depended on which modules pytest happened to collect
 first — `pytest tests/test_scoring.py` reported 64 tests green while running
-none of them. A mutation-testing run reported which tests *failed* under each
-mutant and silently ignored the ones that *errored*, so mutants that broke the
-suite outright counted as survivors. And the seeder's `Borderline` recipes each
+none of them. In a sibling project — the reconciliation work, not this repo,
+so do not go looking for the tooling here — a mutation-testing run reported
+which tests *failed* under each mutant and silently ignored the ones that
+*errored*, so mutants that broke the suite outright counted as survivors. And the seeder's `Borderline` recipes each
 carried an `expected` score written in a comment beside a note explaining it;
 `score_application()` computed the real number and nobody compared the two, so
 when the FATF list changed, three recipes went on documenting 15 and 20 points

@@ -502,3 +502,41 @@ def test_every_usable_country_really_has_address_data():
     for key in ("monitored_used", "call_for_action_used"):
         for code in cover[key]:
             assert code in CITIES, f"{code} reported usable but has no address data"
+
+
+def test_the_coverage_warning_fires_when_a_list_is_barely_represented(capsys):
+    """The trigger is a fraction, not zero.
+
+    It used to warn only at zero coverage — the one case nobody would miss. It
+    stayed silent at 1 of 22, which is a country-risk signal exercised by a
+    single jurisdiction: every applicant scoring country points scores them for
+    the same reason, so a rule mishandling every other listed country would
+    pass unnoticed.
+    """
+    import seed
+
+    original = seed.CITIES
+    try:
+        # One monitored jurisdiction reachable, out of however many are listed.
+        only_one = sorted(seed.INCREASED_MONITORING.codes)[:1]
+        seed.CITIES = {code: [("Testville", "T1")] for code in only_one}
+        seed.print_country_coverage()
+        out = capsys.readouterr().out
+    finally:
+        seed.CITIES = original
+
+    assert "WARNING" in out, f"no warning at 1/{len(seed.INCREASED_MONITORING.codes)}:\n{out}"
+    assert "barely exercised" in out
+
+
+def test_no_coverage_warning_when_the_lists_are_well_represented(capsys):
+    """The counterweight: a warning that always fires is noise, not a signal."""
+    import seed
+
+    seed.print_country_coverage()
+    out = capsys.readouterr().out
+
+    assert "WARNING" not in out, (
+        "coverage dropped below the threshold — either address data was removed "
+        f"or a sourced list grew:\n{out}"
+    )
