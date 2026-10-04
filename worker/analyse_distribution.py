@@ -30,6 +30,8 @@ import sys
 from collections import Counter
 
 from scoring import (
+    CALL_FOR_ACTION,
+    INCREASED_MONITORING,
     ApplicantProfile,
     Routing,
     ScreeningHit,
@@ -52,18 +54,28 @@ FAMILY = [
     "Kim", "Osei", "Bakker", "Horvath", "Costa", "Fernandez", "Larsson",
 ]
 
-# Weighted to look like a real book: mostly low-risk, a tail of elsewhere.
+# The higher-risk tail comes from the sourced constant, not from codes named
+# here. The previous version labelled NG, ZA, TR, AE and VN as "FATF increased
+# monitoring"; four of those five had left the list by ruleset 2026-09-2, so the
+# comment was asserting membership that the list it cited did not support.
+_MONITORED_TAIL = sorted(INCREASED_MONITORING.codes)[:5]
+_CALL_FOR_ACTION_TAIL = sorted(CALL_FOR_ACTION.codes)[:1]
+
+# Weighted to look like a plausible book: mostly low-risk, a tail of elsewhere.
 COUNTRIES = (
     ["GB"] * 40 + ["DE"] * 12 + ["FR"] * 10 + ["ES"] * 8 + ["PL"] * 6 +
     ["IE"] * 4 + ["NL"] * 4 + ["IT"] * 4 + ["PT"] * 3 + ["SE"] * 3 +
     ["US"] * 3 + ["IN"] * 2 + ["BR"] * 2 +
-    # FATF increased monitoring
-    ["NG"] * 2 + ["ZA"] + ["TR"] + ["AE"] + ["VN"] +
-    # FATF call for action — genuinely rare in a European consumer book
-    ["IR"]
+    _MONITORED_TAIL[:1] * 2 + _MONITORED_TAIL[1:] +
+    _CALL_FOR_ACTION_TAIL
 )
 
-# ~93% clean, matching a real document-check pass rate.
+# AN INVENTED DEMO ASSUMPTION, not a measured or published figure.
+#
+# This previously read "matching a real document-check pass rate", which cited
+# an industry statistic that was never sourced. The mix is chosen so the
+# document component of the score varies across its five bands; it is not a
+# claim about what any real vendor returns.
 VENDOR_STATUSES = (
     ["Approved"] * 93 + ["Declined"] * 3 + ["Abandoned"] * 2 +
     ["In Review"] * 1 + ["Expired"] * 1

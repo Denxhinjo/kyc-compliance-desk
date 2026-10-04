@@ -401,3 +401,65 @@ def test_the_stored_form_carries_the_thresholds_and_the_ruleset_version():
     }
     assert stored["ruleset_version"]
     assert stored["signals"][0]["reason"]
+
+
+# ---------------------------------------------------------------------------
+# The seeder's borderline recipes
+# ---------------------------------------------------------------------------
+
+
+def test_the_borderline_recipes_document_the_score_they_actually_produce():
+    """`expected` on a Borderline recipe is documentation, and documentation rots.
+
+    Three of these recipes used to hardcode NG, TR and AE and describe them as
+    "monitoring countries" worth 15 points. By ruleset 2026-09-2 none of the
+    three was on the FATF increased-monitoring list, so both the note and the
+    number beside it were wrong — and nothing failed, because score_application()
+    computes the real score and `expected` is only read by humans.
+
+    The countries now come from the sourced constants, so the recipes are true by
+    construction. This asserts it stays that way, because the next list change
+    will move these numbers again.
+
+    Only the recipes without a sanctions match are checked: the others depend on
+    what the screening fixture happens to contain, which is a different test's
+    business.
+    """
+    from seed import BORDERLINE_RECIPES
+
+    mismatches = []
+    for recipe in BORDERLINE_RECIPES:
+        if recipe.listed_name:
+            continue
+        assessment = score_application(
+            ApplicantProfile(
+                country=recipe.country, vendor_status=recipe.vendor_status, hits=()
+            )
+        )
+        if assessment.score != recipe.expected:
+            mismatches.append(
+                f"{recipe.country}/{recipe.vendor_status}: documented "
+                f"{recipe.expected}, computes {assessment.score} — {recipe.note}"
+            )
+
+    assert not mismatches, (
+        "a borderline recipe documents a score the rules no longer produce:\n  "
+        + "\n  ".join(mismatches)
+        + "\n\nThis usually means the reference data moved. Update the recipe's "
+        "expected value and its note, or derive the country from the constant "
+        "so it cannot drift again."
+    )
+
+
+def test_the_seeders_risk_tail_comes_from_the_sourced_lists():
+    """The seeder must not assert who is on a list.
+
+    It draws its higher-risk tail from the scoring constants, intersected with
+    the countries it can furnish an address for. If someone hardcodes a country
+    back in, this fails.
+    """
+    from seed import _CALL_FOR_ACTION_TAIL, _MONITORED_TAIL
+    from scoring import CALL_FOR_ACTION, INCREASED_MONITORING
+
+    assert set(_MONITORED_TAIL) <= set(INCREASED_MONITORING.codes)
+    assert set(_CALL_FOR_ACTION_TAIL) <= set(CALL_FOR_ACTION.codes)

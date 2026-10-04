@@ -70,6 +70,8 @@ from psycopg.types.json import Jsonb
 from config import SANCTIONS_SOURCE
 from db import connect
 from scoring import (
+    CALL_FOR_ACTION,
+    INCREASED_MONITORING,
     ApplicantProfile,
     Routing,
     ScreeningHit,
@@ -432,17 +434,19 @@ def make_name(culture_key: str, rng: random.Random) -> str:
     return " ".join(parts)
 
 
-#: Weighted like a UK-centred consumer book with a broad diaspora mix, and a
-#: thin tail of higher-risk jurisdictions. Not uniform: a uniform country
-#: distribution is tell #2 in its purest form.
-COUNTRIES = (
+#: Weighted like a UK-centred consumer book with a broad diaspora mix. Not
+#: uniform: a uniform country distribution is tell #2 in its purest form.
+#:
+#: These are ordinary countries in an ordinary book. The list says nothing about
+#: anybody's regulatory status, and deliberately so — the previous version
+#: labelled four of them "FATF increased monitoring" in a comment, which was a
+#: claim about the real world that went stale the moment the list was corrected.
+#: Nigeria, Turkiye and the UAE had all left by ruleset 2026-09-2.
+_DIASPORA = (
     ["GB"] * 46 + ["IE"] * 5 + ["DE"] * 8 + ["FR"] * 7 + ["ES"] * 6 +
     ["PL"] * 6 + ["IT"] * 4 + ["NL"] * 4 + ["PT"] * 3 + ["SE"] * 3 +
     ["RO"] * 3 + ["US"] * 3 + ["IN"] * 2 + ["BR"] * 2 + ["ZA"] * 1 +
-    # FATF increased monitoring
-    ["NG"] * 2 + ["TR"] * 1 + ["AE"] * 1 + ["VN"] * 1 +
-    # FATF call for action, genuinely rare here
-    ["IR"] * 1
+    ["NG"] * 2 + ["TR"] * 1 + ["AE"] * 1
 )
 
 CITIES = {
@@ -458,6 +462,29 @@ CITIES = {
     "NG": [("Lagos", "101001")], "TR": [("Istanbul", "34000")],
     "AE": [("Dubai", "00000")], "VN": [("Hanoi", "100000")], "IR": [("Tehran", "11369")],
 }
+
+#: The higher-risk tail, DERIVED FROM THE SOURCED CONSTANTS.
+#:
+#: Intersected with CITIES, which is why it is defined after it. Taking the
+#: sourced list wholesale would put most applicants in countries this seeder has
+#: no address data for, and they would all come out living in the placeholder
+#: city — a worse lie than the one being fixed, and a more visible one.
+#:
+#: So: whatever scoring currently screens against, restricted to the places this
+#: file can furnish an address for. A plenary that changes the list changes this
+#: too, and no comment here asserts who is on it.
+#:
+#: If the intersection is ever empty the tail is simply absent: the seeded book
+#: then contains nobody from a listed jurisdiction, which is a true statement
+#: about the data rather than an invented one.
+_MONITORED_TAIL = sorted(set(INCREASED_MONITORING.codes) & set(CITIES))
+_CALL_FOR_ACTION_TAIL = sorted(set(CALL_FOR_ACTION.codes) & set(CITIES))
+
+#: The pool the seeder draws from. The tail is weighted thin on purpose: a book
+#: where one applicant in ten is from a call-for-action jurisdiction is not a
+#: consumer book, it is a stress test.
+COUNTRIES = _DIASPORA + _MONITORED_TAIL * 3 + _CALL_FOR_ACTION_TAIL
+
 
 STREETS = ["High Street", "Station Road", "Church Lane", "Victoria Road",
            "Mill Lane", "Bishopsgate", "Queen Street", "Park Avenue"]
@@ -516,30 +543,48 @@ class Borderline:
     note: str
 
 
+#: A monitored and a call-for-action jurisdiction, taken from the sourced
+#: constants rather than named here.
+#:
+#: These recipes previously hardcoded NG, TR and AE and described them in their
+#: notes as "monitoring countries" worth 15 points. By ruleset 2026-09-2 none of
+#: the three was on the list, so the notes asserted a status the sourced data
+#: contradicted and the expected scores beside them were wrong. Nothing caught
+#: it because `expected` is documentation — score_application() computes the
+#: real number — which is exactly how a wrong comment survives.
+#:
+#: Deriving them keeps the recipes true by construction: the country IS
+#: monitored, because it came from the monitored list.
+_A_MONITORED_COUNTRY = _MONITORED_TAIL[0] if _MONITORED_TAIL else "GB"
+_A_CALL_FOR_ACTION_COUNTRY = (
+    _CALL_FOR_ACTION_TAIL[0] if _CALL_FOR_ACTION_TAIL else "GB"
+)
+
 BORDERLINE_RECIPES = (
     # --- the referral line: 20 refers, 15 auto-approves ---------------------
-    Borderline("NG", "Approved", False, False, 15,
-               "FATF monitoring only — auto-approves at 15, five points under"),
-    Borderline("TR", "Approved", False, False, 15, "as above, different country"),
+    Borderline(_A_MONITORED_COUNTRY, "Approved", False, False, 15,
+               "a monitored jurisdiction and nothing else — auto-approves at "
+               "15, five points under the line"),
     Borderline("GB", "In Review", False, False, 10,
                "document in review, nothing else — comfortably clear"),
-    Borderline("VN", "In Review", False, False, 25,
+    Borderline(_A_MONITORED_COUNTRY, "In Review", False, False, 25,
                "monitoring plus an unfinished document check — refers"),
-    Borderline("AE", "Approved", True, True, 20,
+    Borderline(_A_MONITORED_COUNTRY, "Approved", True, True, 20,
                "a sanctions name match downgraded to weak by a conflicting "
-               "date of birth, in a monitoring country: exactly on the line"),
+               "date of birth, in a monitored jurisdiction: exactly on the "
+               "line"),
 
     # --- the rejection line: 80 auto-rejects, 75 refers ---------------------
-    Borderline("IR", "Declined", False, False, 80,
+    Borderline(_A_CALL_FOR_ACTION_COUNTRY, "Declined", False, False, 80,
                "call for action plus a declined document — auto-rejects on "
                "the nose, with no sanctions match at all"),
-    Borderline("MM", "Abandoned", False, False, 70,
-               "another call-for-action country, abandoned rather than "
-               "declined — refers instead of refusing"),
+    Borderline(_A_CALL_FOR_ACTION_COUNTRY, "Abandoned", False, False, 70,
+               "call for action, abandoned rather than declined — refers "
+               "instead of refusing"),
     Borderline("GB", "Abandoned", True, True, 50,
                "downgraded match plus an abandoned check"),
-    Borderline("NG", "Abandoned", True, False, 90,
-               "a probable sanctions match, a monitoring country and an "
+    Borderline(_A_MONITORED_COUNTRY, "Abandoned", True, False, 90,
+               "a probable sanctions match, a monitored jurisdiction and an "
                "abandoned document check — well over"),
     Borderline("GB", "Approved", True, False, 45,
                "a clean applicant whose only problem is their name"),
