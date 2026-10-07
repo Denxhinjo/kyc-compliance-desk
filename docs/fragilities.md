@@ -41,22 +41,38 @@ disclosure failure — `fetch()` raises `Unreachable` for any 5xx and routes it 
 
 ---
 
-## `CALL_FOR_ACTION` is unsourced
+## Scoring flattens the FATF call-for-action tiers
 
-**What it is.** `IR`, `KP`, `MM` in `worker/scoring.py`. The codes are believed
-current but were never fetched from a FATF statement or cited to a plenary. The
-data says so: `sourcing: "unsourced"`, null publication date, and the reason
-(HTTP 403 when the statement was attempted) recorded in its provenance.
+**What it is.** The 19 June 2026 statement draws two tiers: counter-measures
+are called for on the DPRK and Iran, while for Myanmar it says enhanced due
+diligence "and not countermeasures". `scoring.py` has one `CALL_FOR_ACTION` set
+worth one number, so a Myanmar applicant scores exactly what a DPRK applicant
+scores.
 
-**Why it matters.** Ruleset `2026-09-2` uses it. The rule this project has
-adopted is sourced-and-cited or not used, and this is neither — the one
-remaining instance of the defect that produced the fabricated country list.
+**Why it is carried.** Changing who scores what is a policy decision, and the
+work that surfaced this was a provenance exercise. Mixing the two would make a
+ruleset version mean two things at once.
 
-**Blocked on.** A copy of the statement being placed in the repo. The fix is a
-new ruleset version carrying the file hash and provenance, never an edit to
-`2026-09-2`.
+**Mitigation in place.** The distinction is recorded in the data, not just
+here: `CALL_FOR_ACTION.tiers` carries both groups and `flattening_note` states
+the limitation, and both reach every decision through `reference_data`. An
+auditor reading a decision can find it without reading this file.
+
+**If you fix it.** It is a new ruleset version with a new points constant, not
+an edit to `2026-10-1`.
 
 ---
+
+## The call-for-action list may move in October 2026
+
+**What it is.** The statement recorded in ruleset `2026-10-1` says that if
+Myanmar makes no further progress by October 2026, the FATF will consider
+counter-measures. `next_review_expected` on that version is `2026-10`.
+
+**What to do.** When the October plenary publishes, obtain the statement, place
+it in `data/fatf/`, and record a NEW ruleset version from the file — never an
+edit to `2026-10-1`. The procedure is the one `025_ruleset_2026_10_1.sql`
+documents.
 
 ## `/web` has no test runner
 

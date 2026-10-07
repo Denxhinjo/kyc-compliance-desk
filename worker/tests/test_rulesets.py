@@ -220,3 +220,119 @@ def test_a_null_version_is_still_allowed(conn):
                 where risk_ruleset_version is null"""
         )
         assert cur.fetchone()[0] >= 0  # asking must not raise
+
+
+# ---------------------------------------------------------------------------
+# Pinning, with more than one version in existence
+# ---------------------------------------------------------------------------
+
+
+def test_a_decision_stays_pinned_to_its_own_version_after_a_newer_one_exists(conn):
+    """The property the whole exercise is for.
+
+    Up to migration 025 there were two ruleset versions and every decision in
+    the data carried the older one, so "pinning works" had never actually been
+    exercised against a newer version arriving. 025 is the first time a version
+    was added while decisions already existed, and the FATF statement it records
+    says Myanmar may be reconsidered in October 2026 — so a third version could
+    follow within weeks.
+
+    This writes a decision under the PREVIOUS version and then resolves it,
+    asserting it still answers with the version it was taken under rather than
+    the newest one.
+    """
+    previous = "2026-09-2"
+    assert previous != RULESET_VERSION, (
+        "this test is only meaningful while a newer version exists; "
+        f"RULESET_VERSION is still {previous}"
+    )
+
+    with conn.transaction() as outer:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into applications
+                    (status, full_name, date_of_birth, address_line1,
+                     address_city, address_postcode, address_country)
+                values ('started', 'Pinning Test', '1990-01-01', '1 Test Street',
+                        'Testville', 'T1 1TT', 'GB')
+                returning id
+                """
+            )
+            application_id = cur.fetchone()[0]
+
+            cur.execute(
+                """
+                insert into decisions
+                    (application_id, outcome, decided_by, reason,
+                     risk_score_at_decision, risk_ruleset_version_at_decision)
+                values (%s, 'approved', 'system', 'decided under the old rules',
+                        30, %s)
+                """,
+                (application_id, previous),
+            )
+
+            # Resolve the decision the way an auditor would: join to the
+            # definition, do not read the current constant.
+            cur.execute(
+                """
+                select r.version,
+                       r.reference_data->'fatf_call_for_action'->>'sourcing',
+                       r.reference_data->'fatf_call_for_action'->>'published_at'
+                  from decisions d
+                  join rulesets r on r.version = d.risk_ruleset_version_at_decision
+                 where d.application_id = %s
+                """,
+                (application_id,),
+            )
+            version, sourcing, published = cur.fetchone()
+
+        assert version == previous, (
+            f"a decision taken under {previous} resolved to {version} — the pin "
+            "has stopped holding, and every past decision is now explained by "
+            "rules it was not taken under"
+        )
+        # And it resolves to what that version actually said about itself, which
+        # the newer version contradicts.
+        assert sourcing == "unsourced", (
+            "2026-09-2 recorded its call-for-action list as unsourced; resolving "
+            f"a decision under it now reports {sourcing!r}, so the older row has "
+            "been rewritten"
+        )
+        assert published is None
+
+        raise psycopg.Rollback(outer)
+
+
+def test_the_current_version_tells_the_newer_story(conn):
+    """The counterweight: the newer version must differ, or the test above is
+    asserting nothing."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """select reference_data->'fatf_call_for_action'->>'sourcing',
+                      reference_data->'fatf_call_for_action'->>'published_at',
+                      reference_data->'fatf_call_for_action'->>'source_sha256'
+                 from rulesets where version = %s""",
+            (RULESET_VERSION,),
+        )
+        sourcing, published, sha = cur.fetchone()
+
+    assert sourcing == "sourced"
+    assert published == "2026-06-19"
+    assert sha and len(sha) == 64
+
+
+def test_the_call_for_action_list_names_the_file_it_was_read_from(conn):
+    """A citation nobody can check is not a citation.
+
+    The hash is of a browser capture rather than the publisher's own PDF, which
+    the data says in source_format. This asserts the fields exist and that the
+    weaker claim is the one recorded — a later change to "pdf-official" should
+    be a deliberate act, not a drift.
+    """
+    assert CALL_FOR_ACTION.source_file
+    assert CALL_FOR_ACTION.source_sha256
+    assert CALL_FOR_ACTION.source_format == "pdf-of-saved-webpage"
+    assert CALL_FOR_ACTION.tiers, "the two tiers the statement draws must be recorded"
+    assert CALL_FOR_ACTION.flattening_note, "the limitation must be stated in the data"
+    assert CALL_FOR_ACTION.next_review_expected == "2026-10"

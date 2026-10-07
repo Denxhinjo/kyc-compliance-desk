@@ -68,7 +68,20 @@ from typing import Any, Mapping
 #:
 #: -1 remains resolvable. Nothing rewrites those rows: they say -1, they were
 #: scored against the -1 list, and that statement stays true.
-RULESET_VERSION = "2026-09-2"
+RULESET_VERSION = "2026-10-1"
+#:
+#: -1 moved to -2 on 2026-09-24 when the increased-monitoring list was replaced
+#: wholesale. -2 moved to 2026-10-1 on 2026-10-07 when the call-for-action list
+#: stopped being unsourced.
+#:
+#: That last bump deserves justifying, because the CODES did not change: IR, KP
+#: and MM before and after, scoring identically. What changed is what can be
+#: proven. 2026-09-2's recorded definition says its call-for-action list was
+#: never fetched and never cited, and that statement must stay true of the
+#: decisions taken under it. Editing the row to say otherwise would be
+#: rewriting history to look better, which is the one thing the rulesets table
+#: exists to prevent. So: a new version, identical in effect, different in what
+#: it can show.
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +215,40 @@ class ListRevision:
 
     provenance: str
 
+    #: The artifact this revision was read from, when one was kept.
+    #:
+    #: Recorded as a path, a SHA-256 of its bytes and its format, because the
+    #: three answer different questions: which file, whether it is the same
+    #: file, and how much the hash is worth. See source_format.
+    source_file: str | None = None
+    source_sha256: str | None = None
+
+    #: WHAT THE HASH IS WORTH, which depends entirely on this.
+    #:
+    #: "pdf-of-saved-webpage" means someone opened the statement in a browser
+    #: and printed it. The hash then proves "this is the artifact I read" and
+    #: NOT "these are FATF's canonical bytes": the capture carries navigation,
+    #: a retrieval timestamp in the page footer and whatever markup the site
+    #: served that minute, all of which change without the statement changing.
+    #: Two honest captures of the same statement hash differently.
+    #:
+    #: "pdf-official" would be the publisher's own file and a stronger claim.
+    #: Say which we have rather than letting the field imply the stronger one.
+    source_format: str | None = None
+
+    #: Distinctions the statement draws that the scoring does NOT.
+    #:
+    #: Recorded rather than implemented, deliberately: changing how anyone is
+    #: scored is a policy decision and this is a provenance exercise. A
+    #: limitation written into the data is one an auditor can find; one left in
+    #: a developer's head is not.
+    tiers: Mapping[str, tuple[str, ...]] | None = None
+    flattening_note: str | None = None
+
+    #: A date the publisher itself says it will revisit this.
+    next_review_expected: str | None = None
+    next_review_note: str | None = None
+
     @property
     def digest(self) -> str:
         """A hash of the codes, so an edit cannot pass unnoticed."""
@@ -217,6 +264,13 @@ class ListRevision:
             "plenary": self.plenary,
             "provenance": self.provenance,
             "digest": self.digest,
+            "source_file": self.source_file,
+            "source_sha256": self.source_sha256,
+            "source_format": self.source_format,
+            "tiers": {k: list(v) for k, v in self.tiers.items()} if self.tiers else None,
+            "flattening_note": self.flattening_note,
+            "next_review_expected": self.next_review_expected,
+            "next_review_note": self.next_review_note,
         }
 
 
@@ -279,31 +333,74 @@ INCREASED_MONITORING = ListRevision(
     ),
 )
 
-#: Iran and the DPRK carry counter-measures; Myanmar carries enhanced due
-#: diligence. Stable since Myanmar was added in October 2022.
+#: The complete set from ONE statement: "High-Risk Jurisdictions subject to a
+#: Call for Action", Paris, 19 June 2026, from the plenary of 17-19 June 2026.
 #:
-#: published_at is null and the codes are deliberately NOT re-fetched. The
-#: call-for-action statement was unreachable (HTTP 403 on every URL form) when
-#: the monitoring list was corrected on 2026-09-24, so no plenary date is
-#: asserted for these three. The codes are believed current; that belief is
-#: not a citation, and the data says so rather than borrowing the monitoring
-#: list's date to look sourced.
+#: Read from a copy of the statement committed at data/fatf/, not fetched. The
+#: previous revision of this list carried a null publication date and said
+#: UNSOURCED, because the statement returned HTTP 403 when it was attempted on
+#: 2026-09-24. This replaces that with a citation.
+#:
+#: The codes are UNCHANGED by this — IR, KP and MM before and after. What
+#: changed is what can be proven about them. That is still a new ruleset
+#: version rather than an edit, because "decisions under 2026-09-2 were scored
+#: against an unsourced list" has to stay true of 2026-09-2.
+#:
+#: WHAT THIS STATEMENT SAYS THAT THE SCORING DOES NOT
+#:
+#: It draws two tiers. Countermeasures are called for on the DPRK and Iran. For
+#: Myanmar the statement says, in terms, "enhanced due diligence — and not
+#: countermeasures". Scoring has one set and one number, so a Myanmar applicant
+#: and a DPRK applicant attract the same 40 points.
+#:
+#: That flattening is recorded here and NOT fixed, because changing who scores
+#: what is a policy decision and this was a provenance exercise. The tiers are
+#: carried in the data so the limitation is discoverable by anyone reading a
+#: decision, rather than living in a developer's memory.
 CALL_FOR_ACTION = ListRevision(
     codes=frozenset(_CALL_FOR_ACTION_NAMES),
     names=_CALL_FOR_ACTION_NAMES,
     source_url=(
-        "https://www.fatf-gafi.org/en/topics/"
-        "high-risk-and-other-monitored-jurisdictions.html"
+        "https://www.fatf-gafi.org/en/publications/"
+        "High-risk-and-other-monitored-jurisdictions/"
+        "call-for-action-june-2026.html"
     ),
-    published_at=None,
-    retrieved_at=None,
-    plenary=None,
+    published_at="2026-06-19",
+    retrieved_at="2026-10-07",
+    plenary="17-19 June 2026",
+    source_file="data/fatf/call-for-action-june-2026-06-19.pdf",
+    source_sha256=(
+        "786f2ffa2e3677dc5f764f2d964589540e57a31fd52d915f43c30ae94c540137"
+    ),
+    #: A browser capture, not FATF's own PDF. See ListRevision.source_format
+    #: for why that distinction is the whole value of the field.
+    source_format="pdf-of-saved-webpage",
+    tiers={
+        "countermeasures": ("KP", "IR"),
+        "enhanced_due_diligence_only": ("MM",),
+    },
+    flattening_note=(
+        "The statement calls for counter-measures on the DPRK and Iran, and "
+        "for enhanced due diligence AND NOT counter-measures on Myanmar. "
+        "Scoring flattens this: all three are one set worth "
+        "COUNTRY_CALL_FOR_ACTION_POINTS, so a Myanmar applicant scores exactly "
+        "what a DPRK applicant scores. Recorded, not fixed."
+    ),
+    next_review_expected="2026-10",
+    next_review_note=(
+        "The statement says of Myanmar: 'If no further progress is made by "
+        "October 2026, the FATF will consider countermeasures.' This list may "
+        "therefore move within weeks of being recorded, which is the case "
+        "pinning a ruleset version onto each decision exists to survive."
+    ),
     provenance=(
-        "UNSOURCED. Not re-fetched during the 2026-09-24 correction: the FATF "
-        "call-for-action statement returned HTTP 403. IR, KP and MM have been "
-        "the set since Myanmar was added at the October 2022 plenary, but no "
-        "publication date is claimed for them here. To close this, fetch the "
-        "current statement and set published_at to its plenary date."
+        "Complete set from the FATF statement 'High-Risk Jurisdictions subject "
+        "to a Call for Action', Paris, 19 June 2026, read on 2026-10-07 from "
+        "the copy committed at data/fatf/call-for-action-june-2026-06-19.pdf. "
+        "All three codes come from that one statement: the DPRK and Iran under "
+        "the heading calling for countermeasures, Myanmar under the heading "
+        "calling for enhanced due diligence. None is carried over from an "
+        "earlier revision or from the constant this replaced."
     ),
 )
 
