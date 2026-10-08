@@ -289,6 +289,33 @@ each.
 
 ---
 
+## Applying one migration at a time — read this before step 1
+
+`python db/migrate.py up` applies **every pending migration in numeric order**.
+The order above is not numeric order, so plain `up` would apply 020 first and
+break the live site at the first step.
+
+Use `--only`:
+
+```bash
+python db/migrate.py up --only 021
+```
+
+It applies exactly that migration, records it with its checksum like any other,
+and refuses if the version is unknown or already applied. It is deliberately not
+"apply up to version N", because that still imposes numeric order — the thing
+that does not hold here.
+
+This was found by rehearsing against a branch rather than by reading the
+runbook. Up to that point the checklist was unexecutable with the tooling the
+project had, and the alternatives would have been running the SQL by hand
+(bypassing the checksum record, so the database would no longer agree with the
+repository) or shuffling migration files between steps.
+
+---
+
+---
+
 ### Step 0 — the pre-check
 
 Read-only. It tells you what steps 1–3 will actually do on Neon, where the
@@ -525,3 +552,51 @@ which is its commit date. Applied to Neon later, those dates precede the moment
 the version actually governed anything live. Left as-is rather than rewritten
 per environment: the date answers "when did these rules come into existence",
 and a version existing before it was deployed is an ordinary state of affairs.
+
+---
+
+## What the rehearsal did, and what it proved
+
+Run on 2026-10-08 against a Neon branch copied from the live database — 736
+applications, 770 decisions, migrations at 019, PostgreSQL 18.6. Every step
+below was executed in order with its verification. Nothing failed after the
+`--only` gap was closed.
+
+| Step | Result |
+| --- | --- |
+| 0 — pre-check | 770 decisions, 770 backfillable, 0 excluded. `versions_in_use` = `{2026-09-1}` only. 13 referred-pending, 0 parked jobs. |
+| 1 — `021` | Applied. Backfill reported **770 of 770**, 0 left NULL — matching the pre-check exactly. |
+| 2 — `024` | Applied. Two rows seeded, both foreign keys present, 770 decisions joinable to a definition. |
+| 3 — `025` | Applied. `2026-10-1` present and reporting `sourced`. |
+| 4 — deploy code | Worker and web run against the branch. One applicant end to end in 105s: scored 60, referred, OFAC provenance shown. Stamped **`2026-10-1`**, and so was its referral row. `/desk/rulesets` listed three versions. |
+| 5 — `022` | Applied, `convalidated = false` as intended. An officer decision through the real desk UI **succeeded** and carried `2026-10-1`. |
+| 6 — `023` | Applied. 0 parked jobs, so nothing became undecidable. A second officer decision succeeded. |
+| 7 — `020` | Applied. A `risk_score` update on a decided application was **refused**; a non-risk update on the same row still worked. 0 jobs parked. |
+
+**What this proves for the real rollout.** The order is right and each step's
+verification is checkable. Specifically:
+
+- Step 3 before step 4 is not theoretical. The new code stamps `2026-10-1`, the
+  foreign key from step 2 is live by then, and the rehearsal confirmed the write
+  succeeds — which it could not have done if `025` had been skipped.
+- Step 5 after step 4 is the one that would have taken the desk down. The
+  rehearsal decided a real case through the UI with the constraint active; the
+  old code would have failed that insert.
+- Step 7's freeze works on a database with real data in it, and does not
+  interfere with ordinary writes to a decided row.
+
+**What the rehearsal could not prove.** It ran against a branch with no live
+traffic, so it says nothing about contention, nor about what happens if a user
+is mid-decision while a migration applies. Each step is short and takes no
+heavy lock, but "no lock contention observed with nobody using it" is a weak
+claim and should be read as one. The backfill in step 1 is the only step with
+meaningful write volume.
+
+### One thing to expect that is not caused by the migrations
+
+The worker logged repeated `vendor.sweep_stuck` failures — *"sweep: 25
+application(s) waiting on the vendor"*, timing out and retrying — before
+eventually succeeding. Those 25 applications are pre-existing live data stuck
+part-way through verification, and the sweeper asking the vendor about all of
+them at once is slow. It predates this rollout and is unrelated to it. Expect
+the same noise on the real run and do not read it as a migration problem.

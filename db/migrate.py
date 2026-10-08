@@ -200,7 +200,7 @@ def cmd_status(conn: psycopg.Connection) -> int:
     return 0
 
 
-def cmd_up(conn: psycopg.Connection, dry_run: bool) -> int:
+def cmd_up(conn: psycopg.Connection, dry_run: bool, only: str | None = None) -> int:
     migrations = discover()
     ensure_bookkeeping_table(conn)
 
@@ -215,6 +215,33 @@ def cmd_up(conn: psycopg.Connection, dry_run: bool) -> int:
     verify_checksums(migrations, applied)
 
     pending = [m for m in migrations if m.version not in applied]
+
+    # --only exists because deployment order is not file order.
+    #
+    # Migrations 020-025 have to reach the deployed database as 021, 024, 025,
+    # then a code deploy, then 022, 023, 020 — because three of them start
+    # rejecting writes the currently deployed code makes, and one adds a foreign
+    # key the new code depends on. Applying them in numeric order breaks the
+    # live site. See docs/deploy.md.
+    #
+    # Without this the runbook was unexecutable: `up` applies everything pending
+    # in numeric order, and the alternatives were running the SQL by hand
+    # (bypassing the checksum record) or shuffling files between steps. A
+    # rehearsal against a copy of the live database found this before the real
+    # rollout did.
+    #
+    # Deliberately NOT a general "apply up to version N": that still imposes
+    # numeric order, which is the thing that does not hold here.
+    if only is not None:
+        known = {m.version for m in migrations}
+        if only not in known:
+            print(f"No migration {only!r}. Known versions: {', '.join(sorted(known))}")
+            return 1
+        if only in applied:
+            print(f"Migration {only} is already applied. Nothing to do.")
+            return 0
+        pending = [m for m in pending if m.version == only]
+
     if not pending:
         print("Nothing to do — the database is up to date.")
         return 0
@@ -286,6 +313,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="list what would be applied without applying it",
     )
+    up.add_argument(
+        "--only",
+        metavar="VERSION",
+        help=(
+            "apply just this one migration, e.g. --only 021. For rollouts where "
+            "deployment order is not file order; see docs/deploy.md."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -294,7 +329,7 @@ def main(argv: list[str] | None = None) -> int:
         ) as conn:
             if args.command == "status":
                 return cmd_status(conn)
-            return cmd_up(conn, dry_run=args.dry_run)
+            return cmd_up(conn, dry_run=args.dry_run, only=getattr(args, 'only', None))
     except psycopg.OperationalError as err:
         print(f"Could not connect to the database:\n{err}", file=sys.stderr)
         return 2
