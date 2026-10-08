@@ -74,16 +74,27 @@ def test_the_recorded_definition_matches_what_scoring_actually_applies(conn):
 
     assert points["sanctions"] == dict(SANCTIONS_POINTS)
     assert thresholds == DEFAULT_THRESHOLDS.as_dict()
-    assert sorted(reference["fatf_increased_monitoring"]["codes"]) == sorted(
-        INCREASED_MONITORING.codes
-    )
-    assert sorted(reference["fatf_call_for_action"]["codes"]) == sorted(
-        CALL_FOR_ACTION.codes
-    )
-    assert (
-        reference["fatf_increased_monitoring"]["published_at"]
-        == INCREASED_MONITORING.published_at
-    )
+
+    # BOTH lists, and their whole provenance rather than a sample.
+    #
+    # This used to check the codes of both lists but the publication date of
+    # only the monitoring one. That gap was not hypothetical: when the
+    # call-for-action list became sourced in 2026-10-1, its CODES did not
+    # change — IR, KP, MM before and after — so a forgotten version bump would
+    # have left new applicants stamped 2026-09-2 while being scored against a
+    # sourced list, and this test would have passed. The version bump was made;
+    # the test would not have caught its absence.
+    for key, revision in (
+        ("fatf_increased_monitoring", INCREASED_MONITORING),
+        ("fatf_call_for_action", CALL_FOR_ACTION),
+    ):
+        recorded = reference[key]
+        assert sorted(recorded["codes"]) == sorted(revision.codes), key
+        assert recorded["published_at"] == revision.published_at, key
+        assert recorded["plenary"] == revision.plenary, key
+        assert recorded["digest"] == revision.digest, key
+        assert recorded["source_sha256"] == revision.source_sha256, key
+        assert recorded["source_format"] == revision.source_format, key
 
 
 def test_every_version_in_the_data_has_a_definition(conn):
@@ -336,3 +347,70 @@ def test_the_call_for_action_list_names_the_file_it_was_read_from(conn):
     assert CALL_FOR_ACTION.tiers, "the two tiers the statement draws must be recorded"
     assert CALL_FOR_ACTION.flattening_note, "the limitation must be stated in the data"
     assert CALL_FOR_ACTION.next_review_expected == "2026-10"
+
+
+def test_the_constant_names_the_newest_ruleset(conn):
+    """scoring.RULESET_VERSION must be the latest version by effective date.
+
+    WHAT GOES WRONG IF THE CONSTANT IS LEFT BEHIND
+
+    Recording a new ruleset version and forgetting to bump the constant does not
+    fail anything on its own. Scoring carries on, applications carry on being
+    stamped — with the PREVIOUS version's string, while being scored by the
+    current code.
+
+    That inverts the property this whole table exists to provide. A decision
+    taken today would resolve, through the join an auditor uses, to a definition
+    describing rules it was not taken under. For 2026-10-1 specifically it would
+    have been precisely the wrong way round: new applicants would carry
+    2026-09-2, whose recorded definition states that its call-for-action list
+    was never fetched and never cited — while they had in fact been scored
+    against the sourced list. The record would understate its own provenance,
+    and an officer defending that decision would be reading the wrong row.
+
+    Checking it against effective_from rather than against a hardcoded string
+    means this keeps working at the next bump without being edited, which is the
+    only kind of guard that survives.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "select version from rulesets order by effective_from desc, version desc limit 1"
+        )
+        row = cur.fetchone()
+
+    assert row is not None, "no ruleset versions recorded at all"
+    newest = row[0]
+    assert RULESET_VERSION == newest, (
+        f"scoring.RULESET_VERSION is {RULESET_VERSION!r} but the newest recorded "
+        f"ruleset is {newest!r}. "
+        "Either a version was recorded without bumping the constant — in which "
+        "case new applications are being stamped with the older version while "
+        "scored by the current code — or the constant was bumped without "
+        "recording what the new version contains."
+    )
+
+
+def test_a_newly_scored_application_is_stamped_with_the_newest_version(conn):
+    """End to end, through the real scoring path rather than the constant.
+
+    The test above compares two strings. This one scores an applicant the way
+    the worker does and checks what actually comes out, because the constant
+    being right and the assessment carrying it are different claims.
+    """
+    from scoring import ApplicantProfile, score_application
+
+    assessment = score_application(
+        ApplicantProfile(country="GB", vendor_status="Approved", hits=())
+    )
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "select version from rulesets order by effective_from desc, version desc limit 1"
+        )
+        newest = cur.fetchone()[0]
+
+    assert assessment.ruleset_version == newest
+    assert assessment.as_dict()["ruleset_version"] == newest, (
+        "the version reaches the assessment but not the stored form, so it would "
+        "not reach applications.risk_signals either"
+    )

@@ -625,9 +625,10 @@ Second, the system refuses to let an officer sign off a case when it knows it ha
 evidence it failed to record. It would rather stop than let someone decide in
 ignorance.
 
-Third, and most useful to you: I found a fabricated country list in my own
-project. The FATF jurisdictions had been written from memory and presented as a
-legal reference, and every existing decision was scored against it. I did not
+Third, and most useful to you: I found an unsourced country list in my own
+project. The FATF jurisdictions had been written from memory and never checked
+against a source, while being presented as a legal reference, and every existing
+decision was scored against it. I did not
 quietly correct it. The affected decisions still say what they were actually
 scored against, and the rules table now states in the clear that that version's
 list was unsourced. The current version is read from the published statement,

@@ -261,52 +261,267 @@ a manual deploy is a smaller problem than a silently empty one.
 
 ---
 
-## Applying migrations 020–023 to Neon
+## Rolling migrations 020–025 out to Neon
 
-**File order is not deployment order.** Applying these in numeric order breaks
-the live site. Four of them interact, and two of them change behaviour the
-deployed code has to be ready for.
+Neon is at **019**. Six migrations are pending, and **file order is not
+deployment order** — applying them 020 first breaks the live site.
 
-| # | Step | Why it cannot move |
+Three of them change what the database will *accept*, and the deployed code has
+to be ready before each of those lands. One changes what the system *does*
+rather than what it accepts. The order below is the only one where no step
+breaks the step before it.
+
+Nothing here has been run. Run it yourself, one step at a time, checking after
+each.
+
+### The order
+
+| # | Step | What it does to the live database |
 | --- | --- | --- |
-| 1 | `021` — add `decisions.risk_ruleset_version_at_decision`, backfill | Nullable column, no default: a catalogue change, not a table rewrite. Safe against the code already deployed, which does not know it exists. |
-| 2 | **Deploy the worker and web code** | From here both decision paths populate the column. |
-| 3 | `022` — require the column on new rows | Before step 2 this makes **every officer decision fail**, because the deployed web code still inserts without it. |
-| 4 | `023` — refuse decisions while screening evidence is parked | Needs the case-view changes from step 2, or an officer meets a database error with nothing to read. |
-| 5 | `020` — freeze risk columns after a decision | **Last.** This is what causes jobs to park. Before 023 is live, jobs would start parking while nothing in the interface accounts for them. |
+| 0 | **Pre-check** (read-only) | Nothing. Tells you what the later steps will do. |
+| 1 | `021` | Adds a nullable column to `decisions` and backfills it. |
+| 2 | `024` | Creates `rulesets`, seeds two versions, adds two foreign keys. |
+| 3 | `025` | Inserts one more `rulesets` row. |
+| 4 | **Deploy worker + web code** | New code starts writing the column and stamping `2026-10-1`. |
+| 5 | `022` | Starts rejecting decisions with no ruleset version. |
+| 6 | `023` | Starts rejecting officer decisions while screening evidence is parked. |
+| 7 | `020` | Starts rejecting re-scores of decided applications — and so starts parking jobs. |
 
-### Before you start
+---
 
-`021`'s backfill only fills rows it can verify — where `risk_scored_at <=
-decided_at`. Everything else is left NULL on purpose. Run this first to see what
-Neon will actually do, read-only:
+### Step 0 — the pre-check
+
+Read-only. It tells you what steps 1–3 will actually do on Neon, where the
+numbers may differ from the development database.
 
 ```sql
 select
-  (select count(*) from decisions)                                                    as total,
+  -- What 021's backfill will fill, and what it will leave NULL.
+  (select count(*) from decisions)                                            as decisions_total,
   (select count(*) from decisions d join applications a on a.id = d.application_id
-    where a.risk_scored_at is not null and a.risk_scored_at <= d.decided_at)          as would_backfill,
+    where a.risk_scored_at is not null and a.risk_scored_at <= d.decided_at)  as will_backfill,
   (select count(*) from decisions d join applications a on a.id = d.application_id
-    where a.risk_scored_at > d.decided_at)                                            as null_scored_after,
+    where a.risk_scored_at > d.decided_at)                                    as null_scored_after,
   (select count(*) from decisions d join applications a on a.id = d.application_id
-    where a.risk_scored_at is null)                                                   as null_never_scored,
+    where a.risk_scored_at is null)                                           as null_never_scored,
+  -- What 024's foreign keys must be able to resolve.
+  (select array_agg(distinct risk_ruleset_version)
+     from applications where risk_ruleset_version is not null)                as versions_in_use,
+  -- What 020 will start parking.
   (select count(*) from applications a join decisions d on d.application_id = a.id
-    where a.status = 'screening' and d.outcome = 'referred')                          as referred_pending;
+    where a.status = 'screening' and d.outcome = 'referred')                  as referred_pending,
+  -- What 023 will start blocking.
+  (select count(*) from jobs
+    where job_type = 'screening.run' and status = 'parked')                   as parked_screening_jobs;
 ```
 
-`referred_pending` is the number to look at before step 5. Those are the cases
-that can start parking jobs once the freeze is on.
+**Read `versions_in_use` before step 2.** Migration 024 seeds `2026-09-1` and
+`2026-09-2`, then adds a foreign key requiring every version on an application
+to exist in `rulesets`. If that array holds anything else, **stop** — 024 will
+fail, and the fix is a new migration recording the missing version, not an edit
+to 024.
 
-`db/migrate.py` prints each migration's own `RAISE NOTICE` lines, so `021`
-reports its backfill counts as it runs — no need to reach for `psql` to see
-them.
+`referred_pending` is the number that becomes parkable at step 7.
+
+---
+
+### Step 1 — `021`, the column and the backfill
+
+**What it does.** Adds `decisions.risk_ruleset_version_at_decision`, nullable
+with no default, then copies each application's version onto its decisions — but
+only where `risk_scored_at <= decided_at`, meaning the score was written before
+the decision was taken. A score written *after* its decision cannot be trusted
+to be the one the decision used, so those rows stay NULL.
+
+**Why first.** A nullable column with no default is a catalogue change rather
+than a table rewrite: it does not touch existing rows and takes no meaningful
+lock. Nothing deployed knows the column exists, so nothing behaves differently.
+It is the only one of the six invisible to running code, which is what makes it
+safe to go first.
+
+**Why it cannot be later.** Step 2 adds a foreign key *on this column*. Step 4's
+code writes to it. Step 5 requires it.
+
+**The slow part.** The backfill is one UPDATE per qualifying decision row — the
+only step here with meaningful write volume.
+
+**Verify after.** The migration prints its own counts and `db/migrate.py`
+surfaces them. They should match `will_backfill`, `null_scored_after` and
+`null_never_scored` from the pre-check.
+
+---
+
+### Step 2 — `024`, the rulesets table
+
+**What it does.** Creates `rulesets`, makes it append-only with triggers, seeds
+`2026-09-1` and `2026-09-2`, and adds foreign keys from
+`applications.risk_ruleset_version` and
+`decisions.risk_ruleset_version_at_decision` to `rulesets.version`.
+
+**Why after 021.** One of those foreign keys is on the column 021 adds. Applied
+first it refuses: the column does not exist.
+
+**Why before the code deploy.** The currently deployed code stamps `2026-09-2`,
+which this seeds. The *new* code stamps `2026-10-1`, which this does not. Deploy
+the code first and either the new rows cannot be written, or 024 later fails on
+data it cannot resolve.
+
+**What breaks if skipped.** Step 3 inserts into a table that does not exist.
+
+**Verify after.**
+
+```sql
+select version, effective_from::date from rulesets order by effective_from;
+-- expect 2026-09-1 and 2026-09-2
+
+select count(*) from decisions d
+  join rulesets r on r.version = d.risk_ruleset_version_at_decision;
+-- expect this to equal will_backfill from the pre-check
+```
+
+---
+
+### Step 3 — `025`, the current version
+
+**What it does.** Inserts one row: `2026-10-1`, the version whose
+call-for-action list is read from the committed FATF statement.
+
+**Why here, and not after the deploy.** This is the row the new code's version
+string points at. The foreign key from step 2 is already live, so the moment the
+new code scores an applicant it writes `2026-10-1` into
+`applications.risk_ruleset_version`. If this row is absent that write is
+rejected and the application cannot be scored at all.
+
+**What breaks out of order.** Deploy the code before this and scoring fails on
+the live system with a foreign key violation. Loudly rather than silently, which
+is the right direction — but it fails.
+
+**Verify after.**
+
+```sql
+select version, reference_data->'fatf_call_for_action'->>'sourcing'
+  from rulesets order by effective_from;
+-- 2026-10-1 present, reporting 'sourced'
+```
+
+---
+
+### Step 4 — deploy the worker and web code
+
+**What it does.** From here both decision paths write
+`risk_ruleset_version_at_decision`, new applications are stamped `2026-10-1`,
+the case view shows the stuck-evidence and retry notices, and `/desk/rulesets`
+exists.
+
+**Why after steps 1–3.** It writes a column that must exist (1), naming a
+version that must resolve (2 and 3).
+
+**Why before steps 5–7.** Each of those rejects something the *old* code does.
+Applying them first turns working behaviour into errors.
+
+**Verify after.** Put one applicant through end to end on the live site, then:
+
+```sql
+select risk_ruleset_version from applications order by created_at desc limit 1;
+-- expect 2026-10-1
+```
+
+Open `/desk/rulesets` and confirm three versions are listed.
+
+---
+
+### Step 5 — `022`, requiring the version
+
+**What it does.** Adds a `CHECK` constraint, `NOT VALID`, so every *new* decision
+must carry a ruleset version while existing rows are left unexamined.
+
+**Why after the code deploy.** This is the step that breaks most visibly out of
+order. The currently deployed web code inserts decisions without the column.
+Apply this before step 4 and **every officer decision on the live desk fails**
+with a constraint violation until the code is deployed.
+
+**Why `NOT VALID` matters here.** 021 deliberately leaves the column NULL where
+the data could not establish a version. A validating constraint would refuse to
+be added while those rows exist, and the only way to satisfy it would be to fill
+them with a guess.
+
+**Verify after.** Decide one case on the live desk — it should succeed. Then:
+
+```sql
+select count(*) from decisions where risk_ruleset_version_at_decision is null;
+-- should not increase from here on
+```
+
+---
+
+### Step 6 — `023`, the stuck-evidence guard
+
+**What it does.** Refuses an officer's decision while a `screening.run` job for
+that application is parked. Automatic decisions are unaffected.
+
+**Why after the code deploy.** The case view is what explains the refusal.
+Without the new code an officer meets a bare database error with nothing to
+read.
+
+**Why before 020.** 020 is what *causes* jobs to park. The other way round and
+jobs start parking while nothing in the interface accounts for them — an officer
+could decide a case whose new evidence is sitting unrecorded in a failed job,
+which is the exact situation this prevents.
+
+**What it may block immediately.** Whatever `parked_screening_jobs` reported in
+the pre-check. If that is non-zero, those applications become undecidable until
+someone looks at the jobs — which is the intent, but know it before rather than
+after.
+
+**Verify after.** With no parked jobs, deciding a case still works.
+
+---
+
+### Step 7 — `020`, the freeze
+
+**Last.** It refuses any change to an application's scoring columns once a
+decision row exists for it.
+
+**What it does to live behaviour** — and this is the only step that changes what
+the running system *does* rather than what it accepts: a redelivered screening
+job for a referred case whose score would change now raises instead of writing.
+It retries, exhausts its attempts and parks. Nothing is half-written, because
+the whole job is one transaction, but the job stops and the evidence it carried
+is not recorded.
+
+**Why last.** Because of that sentence. Step 6 and the step 4 code are what make
+a parked job visible to an officer and stop a decision being taken without it.
+Applying 020 first means jobs can park into silence.
+
+**What to expect.** `referred_pending` from the pre-check is the set of
+applications that can now park a job. Most will not — a job only fails if the
+score would actually change.
+
+**Verify after.**
+
+```sql
+select count(*) from jobs where job_type = 'screening.run' and status = 'parked';
+-- watch over the next day; a slow rise is the freeze working as intended
+```
+
+---
 
 ### If something is already wrong
 
-A decision that fails with `decisions_ruleset_version_present` means 022 was
-applied before the code deploy. Deploy the code; nothing needs undoing.
+**Decisions failing with `decisions_ruleset_version_present`** — 022 was applied
+before the code deploy. Deploy the code; nothing needs undoing.
 
-A parked `screening.run` job is not an error to clear blindly — it means
-screening found something it could not record. See
-`023_no_decision_while_evidence_is_stuck.sql` and the "superseding assessments"
-proposal in `decisions.md`.
+**Scoring failing with a foreign key violation on `risk_ruleset_version`** — the
+code was deployed before 025. Apply 025; nothing needs undoing.
+
+**024 refusing to apply** — an application carries a version `rulesets` does not
+contain. Do not edit 024. Record the missing version in a new migration, built
+from the repository the way 024's own rows were.
+
+### One caveat about `effective_from`
+
+Each `rulesets` row records when its version took effect *in the repository*,
+which is its commit date. Applied to Neon later, those dates precede the moment
+the version actually governed anything live. Left as-is rather than rewritten
+per environment: the date answers "when did these rules come into existence",
+and a version existing before it was deployed is an ordinary state of affairs.

@@ -2696,7 +2696,7 @@ right call for a different reason: they do not merely deploy separately, they
 can actively break each other, because config at the root is not namespaced to
 whoever wrote it.
 
-## The FATF country list was fabricated, and how that was possible
+## The FATF country list was never sourced, and how that was possible
 
 The risk score adds points for the applicant's country: 40 for a jurisdiction
 subject to a FATF **call for action**, 15 for one under **increased
@@ -2747,7 +2747,7 @@ the per-country sections above the heading "Jurisdictions No Longer subject to
 Increased Monitoring"; Algeria and Namibia sit below it and are removals, not
 members. That distinction is the one a careless read gets wrong.
 
-Against the fabricated set: **13 removed** (Burkina Faso, Croatia, Mali,
+Against the unsourced set: **13 removed** (Burkina Faso, Croatia, Mali,
 Mozambique, Namibia, Nigeria, Philippines, Senegal, South Africa, Tanzania,
 Türkiye, Uganda, UAE), **14 added** (Angola, Bosnia and Herzegovina, Bulgaria,
 Bolivia, Côte d'Ivoire, Iraq, Kenya, Kuwait, Lao PDR, Lebanon, Nepal, Papua
@@ -2780,7 +2780,7 @@ The codes and their plenary date are pinned **as a pair** in
 `test_country_lists.py`. Editing the set changes the digest and fails the test,
 and the only way to make it pass is to come back and state which plenary the
 new codes are from. **An undated edit cannot be committed** — which is exactly
-the defect that produced the fabricated list.
+the defect that produced the unsourced list.
 
 The other tests enforce that the date is a real ISO date and not a placeholder,
 that `retrieved_at` is not before `published_at`, that the two lists are
@@ -3110,3 +3110,48 @@ it is a failure saying the check could not run. The underlying rule is the one
 worth carrying to other projects: *a check that cannot distinguish "I looked
 and found nothing" from "I could not look" is not a check*, and the fix is
 never to look harder — it is to make the two outcomes impossible to confuse.
+
+## Committing someone else's publication, and why
+
+`data/fatf/call-for-action-june-2026-06-19.pdf` is in the repository. It is the
+FATF statement "High-Risk Jurisdictions subject to a Call for Action", published
+19 June 2026, captured from a browser and printed to PDF.
+
+**Why it is committed rather than referenced.** Ruleset `2026-10-1` records a
+SHA-256 of that file. A hash of a file nobody else has is not provenance — it is
+a number. Committing the bytes is what turns `source_sha256` into something a
+reader can check: fetch the repository, hash the file, compare. Without it the
+field asserts that *someone* once read *something*, which is the kind of claim
+this project spent a week removing.
+
+It also makes the list reproducible. The codes in `CALL_FOR_ACTION` were read
+off this file; anyone doubting them can read it too, rather than taking the
+constant on trust. That matters more than usual here, because the previous
+version of a FATF list in this repository was written from memory and never
+checked against a source, and the only remedy for that class of problem is to
+make the source reachable.
+
+**What it is and is not.** It is **FATF's publication, included for
+provenance**. It is not this project's content, it is not a sanctions or country
+list the code reads at runtime, and it is not represented as anything other than
+a capture of a public statement. Nothing in the repository modifies it. The code
+reads its contents only in the sense that a human read it once and transcribed
+three country codes, which the migration records along with the file's hash so
+that transcription can be audited.
+
+**The limits, which are recorded next to the hash and not only here.** The file
+is a browser capture, not FATF's own PDF — its footer carries the retrieval
+timestamp and its header the source URL. So the hash proves "this is the
+artifact that was read" and not "these are the publisher's canonical bytes": two
+honest captures of the same statement, taken minutes apart, hash differently.
+`reference_data.fatf_call_for_action.source_format` says `pdf-of-saved-webpage`
+precisely so the field cannot be read as the stronger claim. If the publisher's
+own PDF is obtained later, that is a new ruleset version with a different hash
+and a stronger format, not an edit to this one.
+
+**A note on size and licence.** It is 354 KB, which is small enough that keeping
+it costs nothing worth discussing. The large reference data this project uses —
+the OFAC list, the OpenSanctions export — is deliberately gitignored and fetched
+instead, because those are megabytes and are republished constantly. A single
+dated statement is the opposite case: small, fixed, and worthless if it changes
+underneath the hash that cites it.
