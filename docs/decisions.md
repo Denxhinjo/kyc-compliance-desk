@@ -3155,3 +3155,56 @@ the OFAC list, the OpenSanctions export — is deliberately gitignored and fetch
 instead, because those are megabytes and are republished constantly. A single
 dated statement is the opposite case: small, fixed, and worthless if it changes
 underneath the hash that cites it.
+
+## Leaving a word I would not write again
+
+Ruleset `2026-09-2`'s change note, seeded by migration 024 and now a row in the
+`rulesets` table, opens:
+
+> Replaced the **fabricated** increased-monitoring set with the complete set
+> from one FATF statement…
+
+"Fabricated" implies intent. The accurate charge is narrower and worse in a
+different way: the codes were written from memory and never checked against a
+source. Nobody set out to deceive; the check simply never happened. Every other
+description of that list — in the walkthrough, and in this file — now says so.
+
+That row is not being changed, for three reasons that stack.
+
+**The exception that allowed the earlier edits no longer applies.** Migrations
+020–025 were edited after being applied once before, and their checksums
+refreshed, on an argument with a specific load-bearing clause: the commits had
+not been pushed, so no other copy of the repository contained them, and no
+deployed database had seen them. Both halves have since stopped being true of
+024 — it is pushed, and it is part of a rollout about to be rehearsed. The
+exception was documented as not generalising. Invoking it a third time, for a
+word, would make it a habit with a paragraph of justification attached, which is
+what "one-time" exists to prevent.
+
+**The table cannot be edited anyway, by its own design.** `rulesets` refuses
+UPDATE and DELETE through triggers. Correcting that sentence would mean dropping
+the table and re-applying the migration — not a correction but a reconstruction,
+and precisely the manoeuvre the append-only rule exists to make impossible once
+the data matters.
+
+**And the row is doing its job.** A record that says what was written at the
+time, and goes on saying it after the author's view has moved on, is the whole
+point. If a note could be revised whenever its wording came to look unfair, the
+table would record current opinion rather than history — and a compliance
+officer defending a decision would be reading a version of the past that had
+been tidied. The discomfort of leaving it is the mechanism working.
+
+What a reader gets, then, is a row recording the judgement as it stood on
+2026-09-24, and a documented correction of that judgement elsewhere, dated
+later. That is the same shape as the rest of the system: the audit log is
+corrected by appending, migration 007 supersedes migration 004's design note
+without editing it, and a ruleset is corrected by recording a new version. A
+sentence that embarrasses its author slightly is a small price for a record
+nobody has to wonder about.
+
+**The general rule, for next time.** Prose that will end up inside an immutable
+row deserves the care of a published statement, because that is what it becomes.
+"Fabricated" was written in a commit message first, where it was merely wrong,
+and carried into the migration without being reconsidered. Wording destined for
+`rulesets`, `audit_events` or a migration comment is worth one more read than
+wording destined for a README.
