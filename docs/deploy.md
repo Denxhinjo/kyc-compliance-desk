@@ -289,6 +289,117 @@ each.
 
 ---
 
+## STOP — "deploy the code" has already happened, by itself
+
+Checked 2026-10-08. The order above assumes the code deploy is a step you take
+between migrations. On this project it is not: **half of it has already
+happened, automatically, and the other half has not.**
+
+| Project | Git-connected? | Code currently live |
+| --- | --- | --- |
+| `kyc-drain` — runs the **worker** against production | **Yes. Auto-deploys to Production on every push to master.** | `4e57a32`, deployed 2026-10-08 12:11 |
+| `kyc-compliance-desk` — the **web app** | No, disconnected after the root-directory incident | Predates `9aba3d2` (2026-09-24) |
+
+Evidence: `gh api repos/.../deployments` lists a Production deployment per push
+since 2026-10-03, every one with a `target_url` under `kyc-drain`. The live
+stats page does not contain the `chart-scroll` marker introduced on 2026-09-24,
+so the web app has not been rebuilt since before then.
+
+### What that means right now
+
+The deployed worker writes `risk_ruleset_version_at_decision` when it records a
+decision. **Production's `decisions` table does not have that column** — 021 is
+unapplied. So every automatic decision on production fails with "column does not
+exist", and has done since `f0f3965` deployed on 2026-10-03.
+
+It has not been noticed because the drain's HTTP endpoint returns success
+whether or not the jobs inside it succeeded. The GitHub Actions cron has
+reported green throughout. The failure is real, latent, and armed: it fires the
+next time an application reaches screening.
+
+**This makes 021 a repair, not merely the first step.** Applying it fixes a
+live system that is currently broken.
+
+### What changes in the order
+
+| Step | Changed? | Why |
+| --- | --- | --- |
+| 0 pre-check | **Extra gate added** — see below | It now has to answer a question it did not before |
+| 1 `021` | **Urgent** | Repairs the live failure, not just preparation |
+| 2 `024` | **Gated on the pre-check** | May be unsafe; see below |
+| 3 `025` | Unchanged | |
+| 4 deploy code | **Split in two** | The worker half is done. The **web half still must be deployed by hand**, and it is not optional — step 5 depends on it |
+| 5 `022` | Unchanged, and the reason now matters more | The deployed **web** code does not write the column. Applying 022 before deploying the web app breaks every officer decision |
+| 6 `023` | Unchanged | Still needs the new case view, i.e. the web deploy |
+| 7 `020` | Unchanged | Still last |
+
+The web deploy is the step most likely to be skipped now, precisely because
+"deploy the code" sounds done. It is not:
+
+```bash
+cd web && npx vercel deploy --prod
+```
+
+### The extra gate: what the pre-check must show before 024 is safe
+
+Migration 024 adds a foreign key requiring **every** version on an application
+to exist in `rulesets`, and it seeds only `2026-09-1` and `2026-09-2`. The
+deployed worker stamps **`2026-10-1`**, which 024 does not seed and only 025
+adds.
+
+So before running 024, `versions_in_use` from the pre-check must contain
+**nothing outside `{2026-09-1, 2026-09-2}`**.
+
+```sql
+select array_agg(distinct risk_ruleset_version)
+  from applications where risk_ruleset_version is not null;
+```
+
+**If it contains `2026-10-1`, do not run 024.** It will fail — cleanly and
+atomically, because the migration is one transaction, so nothing is left
+half-applied — but it will not go in, and the remedy is a migration that records
+`2026-10-1` before the keys are added, which does not exist yet. Report it
+rather than improvising.
+
+Is `2026-10-1` likely to be there? Probably not, and the reasoning is worth
+following. Scoring and deciding happen in **one transaction**: the worker writes
+the version onto the application and then inserts the decision. The decision
+insert is the statement that fails, so the whole transaction rolls back and the
+version is never committed. The exception is a re-screen of an
+already-referred case, where the worker returns early without inserting a second
+decision — there, the version write commits on its own. That path is reachable,
+which is why this is a gate and not an assumption.
+
+### Before you start: stop the code changing under you
+
+`kyc-drain` redeploys on every push to master. A push during the rollout swaps
+the worker mid-sequence. Either finish the rollout without pushing, or pause the
+integration first:
+
+**Vercel dashboard → the `kyc-drain` project → Settings → Git → Disconnect**, or
+**Settings → Git → Ignored Build Step** set to always skip. Reconnect afterwards.
+
+The GitHub Actions cron is separate and can be left alone — it only calls the
+endpoint. If you want it quiet during the window:
+**GitHub → Actions → the `drain` workflow → ⋯ → Disable workflow.**
+
+### Where to look, if you would rather confirm this yourself
+
+- **Vercel dashboard → `kyc-drain` → Settings → Git.** If a repository is shown
+  as connected, pushes deploy. → **Deployments** tab shows the commit for each.
+- **Vercel dashboard → `kyc-compliance-desk` → Settings → Git.** Expect no
+  connected repository. → **Deployments** shows its last build and its date.
+- **GitHub → the repository → Environments / Deployments** (right-hand sidebar
+  on the Code tab) lists what Vercel has deployed and from which commit.
+- **GitHub → Actions → `drain`** for the cron's history. Note that a green run
+  there means the HTTP call succeeded, **not** that the jobs it triggered did.
+
+The last point is worth keeping: a cron that reports success while the work it
+triggers fails is the same defect class recorded in `decisions.md` — something
+that looks like a check and is not one.
+
+---
+
 ## Applying one migration at a time — read this before step 1
 
 `python db/migrate.py up` applies **every pending migration in numeric order**.
