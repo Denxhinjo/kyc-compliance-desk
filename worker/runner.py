@@ -33,8 +33,26 @@ from jobs import Job, complete_job, fail_job
 log = logging.getLogger("worker.runner")
 
 
-def run_job(conn: psycopg.Connection, job: Job) -> None:
+class JobOutcome:
+    """How one job ended. Returned so a caller can COUNT failures.
+
+    run_job used to return None and put the outcome only in the log. That
+    is why the drain endpoint could answer 200 while every job inside it
+    failed, and why the scheduled run stayed green from 3 October while no
+    automatic decision was being recorded. A result nobody can read is a
+    result nobody checks.
+    """
+
+    DONE = "done"
+    RETRYING = "retrying"
+    PARKED = "parked"
+
+
+def run_job(conn: psycopg.Connection, job: Job) -> str:
     """Execute one claimed job and record how it went.
+
+    Returns a JobOutcome. Callers that ignore it behave exactly as before;
+    the drain endpoint uses it to decide its HTTP status.
 
     The handler's database writes and the 'done' update share ONE transaction,
     so a job cannot be marked finished unless its effects committed, and its
@@ -56,6 +74,7 @@ def run_job(conn: psycopg.Connection, job: Job) -> None:
     except PermanentError as err:
         fail_job(conn, job, str(err), permanent=True)
         log.error("job %s %s PARKED (permanent): %s", job.id, job.job_type, err)
+        return JobOutcome.PARKED
     except Exception as err:
         # Keep the traceback in the log for a human, but store only the message
         # on the row — last_error is read in a list view, not a debugger.
@@ -71,9 +90,11 @@ def run_job(conn: psycopg.Connection, job: Job) -> None:
                 "job %s %s failed (attempt %s/%s), retrying in %.1fs: %s",
                 job.id, job.job_type, job.attempts, job.max_attempts, delay, err,
             )
+        return JobOutcome.PARKED if status == "parked" else JobOutcome.RETRYING
     else:
         elapsed = (time.monotonic() - started) * 1000
         log.info(
             "job %s %s done (attempt %s, %.0fms)",
             job.id, job.job_type, job.attempts, elapsed,
         )
+        return JobOutcome.DONE

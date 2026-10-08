@@ -252,3 +252,81 @@ def test_the_endpoint_refuses_without_the_secret(monkeypatch):
     assert module.authorised({"x-drain-secret": "s3cret"}) is True
     assert module.authorised({"x-drain-secret": "wrong"}) is False
     assert module.authorised({}) is False
+
+
+# ---------------------------------------------------------------------------
+# A drain that fails must SAY it failed
+# ---------------------------------------------------------------------------
+#
+# Added 2026-10-08, after five days in which every automatic decision on
+# production failed behind a green scheduled run. The endpoint answered 200
+# whatever happened inside it, because drain_once returns normally when its
+# jobs fail — each failure is caught per job, recorded on the row and logged.
+# The HTTP call had succeeded, so the caller was told so.
+#
+# See docs/incident-2026-10-03.md.
+
+
+def test_the_result_counts_failed_jobs(db):
+    """The number the endpoint needs, which did not exist before.
+
+    Without a count of failures, "I ran five jobs" and "I attempted five jobs
+    and every one failed" are the same response.
+    """
+    clear(db)
+    enqueue(db, 2, "demo.poison")
+    enqueue(db, 1, "demo.noop")
+
+    result = drain_once(db, limit=10, reap=False)
+
+    assert result.claimed == 3
+    assert result.failed == 2, "two poison jobs should be counted as failures"
+
+
+def test_a_clean_drain_reports_no_failures(db):
+    """The counterweight.
+
+    A result that always reported failures would turn the endpoint permanently
+    red, which is the same uselessness as permanently green.
+    """
+    clear(db)
+    enqueue(db, 3)
+
+    result = drain_once(db, limit=10, reap=False)
+
+    assert result.claimed == 3
+    assert result.failed == 0
+    assert result.parked == 0
+
+
+def test_parked_is_counted_separately_from_failed(db):
+    """`failed` includes jobs that will retry; `parked` is the terminal subset.
+
+    Both are reported so a reader can tell a transient blip from a job the
+    system has given up on. Only the second is an incident.
+    """
+    clear(db)
+    [job_id] = enqueue(db, 1, "demo.poison")
+    with db.cursor() as cur:
+        cur.execute("update jobs set max_attempts = 1 where id = %s", (job_id,))
+
+    result = drain_once(db, limit=5, reap=False)
+
+    assert result.failed == 1
+    assert result.parked == 1, "one attempt with max_attempts=1 parks immediately"
+
+
+def test_run_job_reports_its_outcome(db):
+    """The change that makes the counting possible at all."""
+    from runner import JobOutcome, run_job
+    from jobs import claim_job
+
+    clear(db)
+    enqueue(db, 1, "demo.noop")
+    assert run_job(db, claim_job(db, "outcome-test")) == JobOutcome.DONE
+
+    enqueue(db, 1, "demo.poison")
+    assert run_job(db, claim_job(db, "outcome-test")) in (
+        JobOutcome.RETRYING,
+        JobOutcome.PARKED,
+    )

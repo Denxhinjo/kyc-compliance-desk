@@ -99,6 +99,34 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel requires this na
                 ensure_recurring(conn)
                 result = drain_once(conn, limit=limit)
 
+            # A FAILURE STATUS WHEN THE WORK FAILED.
+            #
+            # This endpoint used to answer 200 no matter what happened inside
+            # it, because drain_once returns normally whether its jobs
+            # succeeded or not — each failure is caught per job, recorded on
+            # the row, and logged. The HTTP call had therefore succeeded, and
+            # the caller was told so.
+            #
+            # That is how, from 3 October 2026, every automatic decision on
+            # production failed for five days while the scheduled run reported
+            # green: the deployed worker was writing a column its database did
+            # not have yet. Nothing was corrupted — each job is one transaction
+            # — but nothing was recorded either, and nothing said so. See
+            # docs/incident-2026-10-03.md.
+            #
+            # 500 rather than a 2xx with a flag in the body: the caller is a
+            # cron, and a cron reads the status code. A flag only a human
+            # notices is the same defect in a new costume.
+            #
+            # The cost, stated: a single transient failure now turns a
+            # scheduled run red, and jobs that merely retry are counted too.
+            # That is the direction this project chooses every time — a noisy
+            # true signal over a quiet false one — and `failed` and `parked`
+            # are both in the body so the reader can tell which they have.
+            if result.failed:
+                self._reply(500, {"error": "jobs failed", **result.as_dict()})
+                return
+
             self._reply(200, result.as_dict())
         except Exception as err:  # noqa: BLE001
             # Log the traceback, return the message. A drain failing is an

@@ -51,7 +51,7 @@ import screening_handler  # noqa: F401
 import sweeper  # noqa: F401
 from config import STALE_SECONDS
 from jobs import claim_job
-from runner import run_job
+from runner import JobOutcome, run_job
 
 log = logging.getLogger("worker.drain")
 
@@ -75,6 +75,19 @@ class DrainResult:
     #: True when the batch filled up or the budget ran out — i.e. there is
     #: almost certainly more to do and the caller should come straight back.
     more: bool
+
+    #: Jobs that did not complete. `failed` counts everything that did not
+    #: finish, `parked` the subset that has given up retrying.
+    #:
+    #: These exist so the caller can tell "I did five things" from "I attempted
+    #: five things and none of them worked" — a distinction the drain endpoint
+    #: could not make until 2026-10-08, which is how every automatic decision
+    #: failed for five days behind a green scheduled run.
+    #:
+    #: Defaulted, and last, so that constructing a DrainResult without them
+    #: still works: these are added to an existing shape, not a redesign of it.
+    failed: int = 0
+    parked: int = 0
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -104,6 +117,8 @@ def drain_once(
             log.warning("reclaimed stale job %s -> %s", job_id, new_status)
 
     claimed = 0
+    failed = 0
+    parked = 0
     hit_budget = False
     while claimed < limit:
         if time.monotonic() - started >= budget_seconds:
@@ -116,7 +131,11 @@ def drain_once(
             break
 
         claimed += 1
-        run_job(conn, job)
+        outcome = run_job(conn, job)
+        if outcome != JobOutcome.DONE:
+            failed += 1
+            if outcome == JobOutcome.PARKED:
+                parked += 1
 
     remaining = claimable_now(conn)
     elapsed_ms = int((time.monotonic() - started) * 1000)
@@ -128,7 +147,14 @@ def drain_once(
         elapsed_ms=elapsed_ms,
         # A full batch means the limit stopped us, not an empty queue.
         more=hit_budget or claimed >= limit or remaining > 0,
+        failed=failed,
+        parked=parked,
     )
+    if failed:
+        log.error(
+            "drain: %d of %d jobs FAILED (%d parked) — the caller is told",
+            failed, claimed, parked,
+        )
     log.info(
         "drain: %d claimed, %d reclaimed, %d still queued, %dms",
         claimed, reclaimed, remaining, elapsed_ms,

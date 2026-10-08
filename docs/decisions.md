@@ -3208,3 +3208,44 @@ row deserves the care of a published statement, because that is what it becomes.
 and carried into the migration without being reconsidered. Wording destined for
 `rulesets`, `audit_events` or a migration comment is worth one more read than
 wording destined for a README.
+
+## A fourth instance, in the live system this time
+
+The project had already named a defect class: *a thing that looks like a check
+and is not one* — the loader whose side effect decided whether 64 tests ran at
+all, a mutation run in a sibling project that counted failures and ignored
+errors, and documented score values never compared against computed ones.
+
+The fourth instance was running in production the whole time it was being
+written up.
+
+The drain endpoint — the HTTP entry point a scheduled job calls every few hours
+to work a batch of queued jobs — returned success whatever happened inside it.
+Each job's failure was caught per job, recorded on its row and logged, and then
+`drain_once` returned normally, so the request had succeeded and the caller was
+told so. From 3 October 2026, the deployed worker was writing a column its
+database did not yet have; every automatic decision failed for five days; the
+scheduled run reported green every time. See
+[incident-2026-10-03.md](incident-2026-10-03.md).
+
+The fix is the same shape as the others. `run_job` now returns an outcome rather
+than putting it only in a log; `DrainResult` carries `failed` and `parked`
+counts; and the endpoint returns **500** when any job failed, which the
+workflow's existing `curl --fail-with-body` already turns into a red run. It was
+proven in both directions before shipping — a forced failure turns the call red,
+a clean queue leaves it green — because a guard that cannot fail and a guard
+that always fails are equally useless, and only testing both tells you which you
+have built.
+
+**The cost, stated rather than discovered later:** a single transient failure now
+turns a scheduled run red, and jobs that merely retry are counted alongside ones
+that have given up. That is the noisier choice and it is the one this project
+takes every time. Both counts are in the response body so a reader can tell
+which they are looking at.
+
+What makes this instance worth recording separately is where it was found. The
+first three were found in the test suite and in the repository, by looking.
+This one was found by **preparing to deploy** — by asking whether the code had
+already shipped, and discovering that half of it had. Reading the code would
+not have revealed it; the code was correct. What was wrong was the relationship
+between two deployment settings, which exists in no file.
