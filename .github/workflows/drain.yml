@@ -57,13 +57,36 @@ jobs:
           # Capped at 12 calls so a genuine backlog cannot turn a cron run into
           # an unbounded loop. Whatever is left waits five minutes.
           for attempt in $(seq 1 12); do
+            # `|| status=$?` rather than letting `set -e` abort on the
+            # assignment, and that is not a style choice.
+            #
+            # --fail-with-body exists to hand you the response body ALONGSIDE
+            # a failure exit code, and for this endpoint that body is the
+            # whole diagnosis: `failed` and `parked` say whether a red run is
+            # one transient blip or work the system has given up on. Under
+            # plain `set -e` the step dies at the assignment, the echo below
+            # never runs, and the log reads `curl: (22) ... error: 500` and
+            # nothing else -- discarding precisely what the 500 was sent to
+            # deliver.
+            #
+            # Found on 2026-10-09 by forcing a red run rather than by reading
+            # this file: the proof that the endpoint reports failure passed,
+            # and showed the report arriving nowhere a human would look.
+            status=0
             response=$(curl --silent --show-error --fail-with-body \
               --max-time 70 \
               --request POST \
               --header "x-drain-secret: ${DRAIN_SECRET}" \
-              "${DRAIN_URL}")
+              "${DRAIN_URL}") || status=$?
 
             echo "call ${attempt}: ${response}"
+
+            # Still red, and now explained. The exit code is curl's own, so
+            # nothing about when this run fails has changed.
+            if [ "${status}" -ne 0 ]; then
+              echo "curl exited ${status}; the line above is the endpoint's own account"
+              exit "${status}"
+            fi
 
             # No jq dependency: one grep on the flag the endpoint returns.
             if ! echo "${response}" | grep -q '"more": *true'; then
