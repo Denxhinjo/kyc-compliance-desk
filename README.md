@@ -659,10 +659,18 @@ approach, not a system that should go near a real customer. Specifically:
   plenary -- wholesale, never country by country, because a set assembled from
   two plenaries screens against countries already cleared and misses countries
   added since. Nothing here fetches it automatically.
-- **The call-for-action list (Iran, DPRK, Myanmar) carries no publication
-  date.** It was not re-fetched when the monitoring list was corrected, because
-  the FATF statement returned HTTP 403, so the data records it as unsourced
-  rather than borrowing the monitoring list's date.
+- **The call-for-action list is sourced, and dated 19 June 2026.** It is the
+  complete set from the FATF statement *"High-Risk Jurisdictions subject to a
+  Call for Action"* (plenary of 17-19 June 2026), read on 7 October 2026 from a
+  copy committed at `data/fatf/call-for-action-june-2026-06-19.pdf` and
+  recorded with that file's SHA-256. It carries DPRK and Iran under the heading
+  calling for counter-measures and Myanmar under the one calling for enhanced
+  due diligence; scoring flattens that distinction, which the data records
+  rather than hides. Until ruleset `2026-10-1` this list was unsourced and the
+  data said so — it had been written from memory and never checked against a
+  statement. The same staleness caveat as the monitoring list applies: nothing
+  fetches it automatically, and the statement itself says counter-measures on
+  Myanmar will be *considered* if no progress is made by October 2026.
 - No segmentation by product, channel or transaction behaviour — all of which a
   real risk model uses.
 
@@ -692,8 +700,12 @@ approach, not a system that should go near a real customer. Specifically:
   would leave every database guarantee intact while telling the losing officer
   the case does not exist.
 - **No pagination.** The queue shows 200 cases and silently hides the rest.
-- **No backups, no disaster recovery, no runbook, no alerting.** Nothing tells
-  anyone that the parked-jobs count is climbing.
+- **No backups, no disaster recovery, no alerting.** Nothing tells anyone that
+  the parked-jobs count is climbing. There *is* a runbook —
+  [`docs/deploy.md`](docs/deploy.md) covers deployment, the migration order,
+  what each step checks and what breaks if it is done out of order, and the
+  whole sequence was rehearsed against a copy of the live database before being
+  run on it.
 
 ### Data protection
 

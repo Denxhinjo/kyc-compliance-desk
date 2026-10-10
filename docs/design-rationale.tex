@@ -361,13 +361,14 @@ person-shaped names that also carry a date of birth --- appears only in the seed
 script, which draws synthetic applicant names from it so that some applicants
 deliberately resemble somebody listed. It narrows who gets \emph{invented},
 never what anybody is screened \emph{against}.
-That is fine for a process
+That is fine for a process that lives for days. It is
 impossible for one that must start, answer and exit.
 
 So the list moved into Postgres and the search became two stages. A trigram GIN
 index over individual name \emph{tokens} narrows the list to a shortlist ---
 a median of 224 entries and a mean of 424, roughly 2\% of the list --- and then
-shortlist with exactly the code that ran before.
+the full comparison runs over that shortlist with exactly the code that ran
+before.
 
 I indexed tokens rather than whole names, and that was the real decision.
 Across the 131 matches the scorer accepts for 400 applicants, whole-string
