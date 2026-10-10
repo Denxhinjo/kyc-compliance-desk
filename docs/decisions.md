@@ -3335,3 +3335,133 @@ hour; or someone wanting `SWEEP_INTERVAL_MINUTES` to mean what it says. The fix
 in each case is the same single character, and nothing else in the system needs
 to change with it — which is the property worth preserving, and the reason the
 cadence is written in one place with the consequences listed beside it.
+
+---
+
+## Decisions become append-only, five migrations late
+
+`audit_events` has been genuinely append-only since migration 006, and the
+project has described that guarantee in those words ever since. `decisions`
+never got the same treatment. Migration 026 fixes that.
+
+### Why the gap was invisible
+
+Because everything around that table looks like protection, and all of it is
+real:
+
+- at most one terminal outcome per application, by partial unique index
+- the named ruleset version must exist and must not be null
+- `reason` and `decided_by` cannot be blank, enforced in the database
+- the scoring inputs behind the decision are frozen once it exists (020)
+
+Every one of those constrains what a decision may **say**. Not one of them
+stops a decision being **rewritten** afterwards. `update decisions set outcome
+= 'approved'` would have succeeded, silently, and the audit trail's own
+immutable record of the original decision would have survived alongside it —
+now contradicting the decision table, with nothing to say which came first.
+
+So the system's most consequential row, the answer to *"why was this customer
+refused"*, was the **current** answer rather than the **only** answer. Five
+migrations of work on making past decisions reconstructable — the ruleset
+versioning, the risk freeze, the evidence-stuck block — all rested on a row
+that could be edited.
+
+### How it was found
+
+Not by a test, and not by reading the schema. By **rewriting the design
+rationale for a compliance reader.**
+
+The engineering document says "the audit log is append-only, enforced by the
+database", which is true. Rewriting it for someone who would ask *"can you show
+me why this customer was approved?"* meant asking which specific row answers
+that and what protects it — and the honest answer was: a unique index, a
+not-null check and two not-blank checks, none of which is immutability.
+
+Worth recording as a method. The audience change was not cosmetic. Writing for
+an engineer, "append-only audit log" reads as a property of the system. Writing
+for someone who will be asked to defend a decision in front of a regulator,
+the same phrase prompts "which table, exactly?" — and that question found a gap
+that four months of writing for engineers had not. **Who you explain a system
+to determines which of its weaknesses you notice.**
+
+### The survey that had to come first
+
+Making a table immutable breaks any code that legitimately writes to it, so the
+precondition was finding every path that does. Every write to `decisions` in
+the worker, the web app, the scripts and the migrations:
+
+| Path | Operation |
+| --- | --- |
+| `web/src/app/desk/[id]/actions.ts` | INSERT — a reviewer's decision |
+| `worker/screening_handler.py` | INSERT — an automatic decision |
+| `worker/seed.py`, `worker/smoke_audit.py` | INSERT |
+| `db/migrations/021_decision_ruleset_version.sql` | **UPDATE** — one-time backfill |
+| desk, stats and rulesets pages | SELECT only |
+
+No UPDATE or DELETE anywhere in application code. The one UPDATE is 021's
+backfill, which runs at 021 — before 026 — so a database rebuilt from scratch
+applies the backfill and only then locks the table. Nothing in 021 needed
+changing, and 026 carries a comment saying so, because the apparent conflict is
+exactly the kind of thing someone later "fixes".
+
+The test suite was the other thing that could have broken, and did not: it
+drops and rebuilds the schema per session rather than deleting rows, and the
+per-test fixtures roll transactions back. A rollback is a transaction abort,
+which no trigger sees.
+
+### The mechanism, deliberately unchanged from 006
+
+A trigger that raises, not a `REVOKE`, because `REVOKE` does not bind the
+table's owner and the owner is the role the application connects as. `FOR EACH
+STATEMENT` rather than `FOR EACH ROW`, so the trigger fires even when the
+statement matches nothing and `delete from decisions where false` is refused
+too — a row-level trigger is one `where` clause away from being bypassed, and
+there is a test that fails the moment someone converts it.
+
+One difference from `rulesets` worth knowing. The `rulesets` truncate test
+asserts only that the statement fails, because `applications` and `decisions`
+hold foreign keys to that table and Postgres rejects truncating a referenced
+table before any `BEFORE TRUNCATE` trigger runs. Nothing holds a foreign key to
+`decisions`, so there the refusal is genuinely ours and the test asserts our
+own message.
+
+### The counterweight, because the refusals are the easy half
+
+Thirteen tests. Eight of them assert that something is refused, and **all eight
+would pass on a table nobody could write to at all** — which would break the
+system completely. So they are paired with assertions that both insert paths
+still work, that a referral can still be recorded alongside an existing
+verdict, that the one-terminal-decision rule still produces a unique violation
+rather than having been quietly replaced, and that the original row survives a
+refused rewrite rather than the statement failing after writing.
+
+The refusals were also checked against the counterfactual rather than assumed:
+with the trigger disabled the same UPDATE affects one row, with it enabled the
+same statement raises. The tests pass because of the migration, not alongside
+it.
+
+### The honest limit, as in 006
+
+A database superuser can disable a trigger — demonstrated above, since that is
+how the counterfactual was run. No in-database mechanism survives someone with
+full control of the database. Real immutability means write-once storage
+outside it, where whoever can edit the database does not control the archive.
+Not built, and the compliance document says so rather than letting
+"append-only" carry more weight in a conversation than it can.
+
+### What this forecloses, stated plainly
+
+**There is now no way to correct a decision, and after this migration there
+cannot be one without a further migration.** That is deliberate and it is the
+right default — a system that can quietly edit its verdicts is worse than one
+that cannot correct them at all, because the first failure is invisible and the
+second is merely inconvenient.
+
+But it is a real constraint, and the design it forces is not yet built: a
+correction must be a **new** decision that references the one it supersedes,
+never an edit. That is the same shape as the proposal already recorded under
+*"Proposed: superseding assessments, not frozen ones"*, and the same argument
+applies — the superseded row stays readable, the superseding row says why, and
+the history of the disagreement survives instead of being replaced by its
+resolution. It wants designing properly before it is built, not improvising the
+first time somebody needs it.
