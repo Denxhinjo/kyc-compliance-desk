@@ -126,3 +126,54 @@ the migration re-applied; once deployed, that option is gone.
 **Not a defect.** It is the cost the immutability is meant to impose, recorded
 here so it is not met as a surprise mid-incident. A correction means recording a
 new ruleset version.
+
+---
+
+## `/stats` answers 200 with a loading shell when the database is unreachable
+
+**How it shows up.** The figures page looks healthy to anything that checks it
+mechanically. `curl -o /dev/null -w '%{http_code}'` returns **200**, the HTML
+arrives, and a human opening the page sees the heading, the layout and six
+skeleton placeholders where the numbers should be — the same thing they would
+see for the half-second before real figures arrive on a working page. Nothing in
+the status code or the headers distinguishes "the database is down" from "the
+database is fine".
+
+Observed on production on 8 October 2026, while the rotated database credential
+had not yet been applied to the web app. The page answered 200 throughout.
+
+**Why.** `web/src/app/stats/` has a `loading.tsx`, which Next.js turns into an
+automatic Suspense boundary for that route. The response therefore *begins* —
+status line, headers, and the shell — before the Server Component's queries run.
+By the time a query throws, the 200 has already been committed and sent. The
+error surfaces mid-stream, where it degrades into a placeholder that never
+resolves rather than into a status code anybody can act on.
+
+This is visible in a healthy response too: fetch `/stats` and the HTML contains
+both the skeleton markup and the real figures, because the shell is sent first
+and the content streamed in behind it. On an unhealthy response only the first
+half arrives.
+
+**Why it is not fixed.** Fixing it properly means either querying before
+committing the response — which gives up the streaming shell that makes the page
+feel fast — or adding a separate health route that actually reaches the database
+and returning a non-200 from it. The second is the right answer and is a small
+piece of work, but it is a *new* check rather than a repair of this one, and
+nothing currently consumes it.
+
+**What to do if it bites.** Do not trust the status code of `/stats` as a
+liveness signal, in a monitor or by hand. Check for a figure instead of a 200:
+
+```bash
+curl -s https://kyc-compliance-desk.vercel.app/stats | grep -qE '[0-9]+ of [0-9]+' \
+  && echo "data resolved" || echo "SHELL ONLY - database unreachable"
+```
+
+**Worth naming.** This is another instance of the pattern recorded in
+`decisions.md` as *things that look like a check and are not one* — alongside
+the sanctions screen that returns fewer matches from a half-loaded list, the
+drain endpoint that reported success whatever happened inside it
+(`docs/incident-2026-10-03.md`), and the equivalence test that stayed red in CI
+while its badge advertised it. The defect is always the same shape: a signal
+that reports on the wrong thing and is read as though it reported on the right
+one.

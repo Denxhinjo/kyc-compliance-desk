@@ -95,8 +95,12 @@ hop and buys nothing.
 
 ## 5. The cron
 
-`.github/workflows/drain.yml`, every five minutes — GitHub's floor, and about
-right. Repository secrets:
+`.github/workflows/drain.yml`, hourly. Not GitHub's floor — the floor is five
+minutes, and the schedule was deliberately lowered on 10 October 2026 because
+the web app's doorbell already covers the path an applicant is watching, so the
+cron only has to drive the two recurring jobs. See `decisions.md` under
+*"Hourly instead of every five minutes"* for the compute reasoning and the
+three costs. Repository secrets:
 
 - `DRAIN_URL` — `https://<drain-project>.vercel.app/api/drain`
 - `DRAIN_SECRET` — matching the function
@@ -108,7 +112,7 @@ loop.
 **Two things about scheduled workflows that will bite eventually.** GitHub
 disables them after 60 days of repository inactivity, so a demo nobody touches
 for two months stops draining until someone presses the button. And scheduled
-runs are best-effort: five minutes is the request, not a promise, and delays of
+runs are best-effort: the hour is the request, not a promise, and delays of
 several minutes happen under load. Neither matters here, because nothing
 depends on punctuality — only on eventually.
 
@@ -149,12 +153,17 @@ Measured separately at the connection level, Neon's resume is **669 ms**; the
 rest of the 2.4 s is the page's own queries and a transatlantic round trip from
 the machine doing the measuring.
 
-**In practice this almost never happens.** The drain cron runs every five
-minutes and Neon's autosuspend is five minutes, so the database is kept awake
-by the heartbeat. A visitor only meets a cold start if the cron has stopped —
-which GitHub does after 60 days of repository inactivity. A demo nobody has
-touched for two months therefore costs its next visitor two and a half seconds,
-and nothing after that.
+**In practice most first visits now meet this.** The drain cron runs hourly and
+Neon's autosuspend is about five minutes, so the database is suspended for
+roughly fifty-five minutes in sixty, and an idle demo is the normal state of a
+demo.
+
+This was the other way round until 10 October 2026: the cron ran every five
+minutes, which defeated autosuspend and kept the compute awake around the
+clock, and this paragraph said a cold start almost never happened. The schedule
+was lowered deliberately, trading this two-and-a-half-second first load for
+twelve times less compute. The reasoning and the other two costs are in
+`decisions.md` under *"Hourly instead of every five minutes"*.
 
 ### The pipeline, end to end
 

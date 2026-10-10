@@ -3249,3 +3249,89 @@ This one was found by **preparing to deploy** — by asking whether the code had
 already shipped, and discovering that half of it had. Reading the code would
 not have revealed it; the code was correct. What was wrong was the relationship
 between two deployment settings, which exists in no file.
+
+---
+
+## Hourly instead of every five minutes
+
+The drain cron went from `*/5 * * * *` to `0 * * * *`. The reasoning is about
+compute, and the costs are real enough to write down rather than discover.
+
+### Why the schedule can be this sparse at all
+
+The web app rings a doorbell the moment it enqueues work, so the path an
+applicant is watching never waited for this schedule: a submitted verification
+is screened and decided within seconds of the webhook arriving, which is
+observable in the audit trail. On the production run of 9 October the whole
+chain — created, vendor session, status change, screening, decision — spanned
+twenty seconds, none of it on the cron.
+
+So the schedule is not what makes the system responsive. What it is actually
+for is the two recurring jobs, because **nothing else drives them**: the reaper,
+which rescues work abandoned by a function killed mid-job, and the sweeper,
+which asks the vendor about applications no webhook ever arrived for. Neither
+has anything to ring a doorbell on its behalf — a webhook that never comes
+raises no event, and a killed function reports nothing.
+
+The question is therefore not "how fresh must the queue be" but "how long may
+an unhappy path sit undetected". An hour is an honest answer for a demo.
+
+### The compute arithmetic
+
+Twelve runs an hour is 288 a day, about 8,640 a month. One run an hour is 24 a
+day, about 720 a month — **twelve times fewer**.
+
+On GitHub's side that is currently free, because the minutes are free on a
+public repository. It stops being free the moment the repository goes private,
+and a scheduled job billed by the minute with a one-minute rounding floor is
+8,640 minutes a month at the old cadence against 720 at the new one. That is
+the difference between a workflow that cannot fit in a free allowance and one
+that comfortably does.
+
+The larger cost was never GitHub's, though. It was Postgres.
+
+**Neon suspends a free-tier compute after about five minutes of inactivity**
+(`docs/deploy.md`). A cron every five minutes therefore defeated autosuspend
+almost perfectly — the database was kept awake around the clock by the
+heartbeat, which `deploy.md` recorded as a *benefit* ("a visitor only meets a
+cold start if the cron has stopped"). Read the other way, it means the demo was
+paying for a continuously running compute in order to save its occasional
+visitor two seconds. At one run an hour the database is suspended for roughly
+fifty-five minutes in sixty, and the compute is paid for when it is used.
+
+### What this costs, stated plainly
+
+**Cold starts stop being rare and become normal.** This is the real price and it
+is paid by the visitor, not the operator. Measured against the live deployment
+and recorded in `deploy.md`: `/stats`, the first page that queries, takes
+**2,437 ms cold against 308 ms warm**, of which Neon's resume is about 669 ms.
+Under the old cadence a visitor essentially never met that. Under the new one
+most first visits will, because an idle demo is the normal state of a demo. The
+paragraph in `deploy.md` claiming this "almost never happens" has been
+corrected in the same commit, because the schedule change inverts it.
+
+**Worst-case recovery latency roughly quadruples.** The reaper only runs when
+something claims it. Abandoned work was previously rescued within about
+`STALE_SECONDS` (10 minutes) plus one cron gap, so roughly fifteen minutes. It
+is now roughly seventy.
+
+**`SWEEP_INTERVAL_MINUTES` becomes aspirational.** It is 15, and the sweeper
+reschedules itself a quarter-hour ahead, but it cannot run until something
+claims it. The cron is now the binding interval, so that constant no longer
+decides anything on its own. The config value and the real behaviour have come
+apart, which is worth knowing before someone tunes the constant and expects an
+effect.
+
+Both of the latter are recovery latencies on paths that are *already* broken,
+not delays on the working one. That is why the trade is acceptable here and
+would not be in a system with customers: an hour of undetected stuck work is
+fine for a portfolio demo and is not fine for anyone's onboarding queue.
+
+### What would change my mind
+
+Any of: the demo acquiring real users, so the cold start on first load stops
+being acceptable; the sweeper's stuck-application window mattering within the
+hour; or someone wanting `SWEEP_INTERVAL_MINUTES` to mean what it says. The fix
+in each case is the same single character, and nothing else in the system needs
+to change with it — which is the property worth preserving, and the reason the
+cadence is written in one place with the consequences listed beside it.

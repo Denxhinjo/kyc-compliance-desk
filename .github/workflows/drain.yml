@@ -7,18 +7,41 @@ name: drain
 # abandoned by a function that was killed mid-job, and the sweeper, which asks
 # the vendor about applications no webhook ever arrived for.
 #
-# Every five minutes is the floor GitHub allows for `schedule`, and it is also
-# about right: the nudge from the web app covers the latency-sensitive path, so
-# this only has to be frequent enough that nothing is stranded for long.
+# HOURLY, and it is a fallback rather than the engine.
 #
-# On a public repository the minutes are free.
+# The web app rings a doorbell the moment it enqueues work, so the path an
+# applicant is watching does not wait for this schedule at all -- a submitted
+# verification is scored within seconds of the webhook, and that is observable
+# in the audit trail. What this schedule is actually for is the two recurring
+# jobs, because nothing else drives them: the reaper, which rescues work
+# abandoned by a function killed mid-job, and the sweeper, which asks the vendor
+# about applications no webhook ever arrived for. Neither has anything to ring
+# a doorbell on its behalf -- a webhook that never comes raises no event.
+#
+# So the question is not "how fresh must the queue be" but "how long may an
+# unhappy path sit undetected", and an hour is an honest answer for a demo.
+# See docs/decisions.md for the compute arithmetic and the costs below.
+#
+# WHAT GOING HOURLY COSTS, stated here because it is invisible from this file:
+#
+#   * SWEEP_INTERVAL_MINUTES is 15. The sweeper reschedules itself a quarter of
+#     an hour ahead, but it can only run when something claims it, so this cron
+#     becomes the binding interval and that 15 is now aspirational. The config
+#     value is no longer the thing that decides.
+#   * Worst-case reap latency was about STALE_SECONDS (10 min) plus one cron
+#     gap, so roughly 15 minutes. It is now roughly 70.
+#
+# Both are recovery latencies on paths that are already broken, not delays on
+# the normal one. Raise the frequency here if that stops being an acceptable
+# trade; nothing else needs to change with it.
 
 on:
   schedule:
-    # Five minutes is GitHub's minimum. Note that scheduled runs are queued on
-    # a best-effort basis and can be delayed by several minutes under load —
-    # fine here, because nothing depends on punctuality, only on eventually.
-    - cron: "*/5 * * * *"
+    # Top of the hour. Scheduled runs are queued on a best-effort basis and can
+    # be delayed by several minutes under load — fine here, because nothing
+    # depends on punctuality, only on eventually, and that was true at five
+    # minutes too.
+    - cron: "0 * * * *"
   # So it can be triggered by hand when demoing, without waiting for the clock.
   workflow_dispatch:
 
