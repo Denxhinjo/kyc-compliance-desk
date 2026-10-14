@@ -1,9 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { withTransaction } from "@/lib/db";
-import { logEvent } from "@/lib/audit";
-import { createVerificationSession } from "@/lib/didit";
+import { startVerificationSession } from "@/lib/verification";
 
 /**
  * Start a verification session and send the applicant to the vendor.
@@ -26,49 +24,19 @@ export async function startVerification(
     return { error: "invalid application id" };
   }
 
+  // The session creation and its bookkeeping live in lib/verification.ts,
+  // because the continuous seeder has to create REAL simulator sessions
+  // through this exact path. The previous bulk seeder wrote a random session
+  // id instead and left 38 applications pointing at sessions the vendor had
+  // never heard of — see the note in that file.
   let session;
   try {
-    session = await createVerificationSession(applicationId);
+    session = await startVerificationSession(applicationId);
   } catch (err) {
     return {
       error: err instanceof Error ? err.message : "could not reach the vendor",
     };
   }
-
-  await withTransaction(async (client) => {
-    // The web service makes exactly ONE lifecycle transition, and guards it in
-    // the WHERE clause: this can only ever move an application forward out of
-    // 'started'. Every vendor-driven transition goes through the state machine
-    // in worker/lifecycle.py instead — duplicating that machine in TypeScript
-    // would mean two copies of the rules that must never disagree.
-    const moved = await client.query(
-      `update applications
-          set status = 'submitted', vendor_applicant_id = $1
-        where id = $2 and status = 'started'`,
-      [session.sessionId, applicationId],
-    );
-
-    // If it was not in 'started' the session id still needs recording, but the
-    // status is someone else's to change.
-    if (moved.rowCount === 0) {
-      await client.query(
-        `update applications set vendor_applicant_id = $1 where id = $2`,
-        [session.sessionId, applicationId],
-      );
-    }
-
-    await logEvent(client, {
-      applicationId,
-      actor: "system:web",
-      action: "verification.session_created",
-      details: {
-        vendor: "didit",
-        session_id: session.sessionId,
-        vendor_status: session.status,
-        status_to: moved.rowCount === 1 ? "submitted" : null,
-      },
-    });
-  });
 
   redirect(session.url);
 }

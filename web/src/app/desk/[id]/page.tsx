@@ -72,6 +72,26 @@ interface AuditRow {
   details: Record<string, unknown>;
 }
 
+/**
+ * Another application from the same person.
+ *
+ * "Same person" is an EXACT match on normalised name and date of birth,
+ * computed by the `person_key` generated column (migration 028). Display only:
+ * it changes no score, merges nothing and decides nothing.
+ *
+ * It exists because five applications from one person, each correctly handled
+ * once, look exactly like one application processed five times to anyone
+ * reading the queue — and that is the failure this project claims to prevent.
+ * Saying "5 applications from this person" costs one line and removes the
+ * ambiguity.
+ */
+interface SiblingApplication {
+  id: string;
+  status: string;
+  created_at: string;
+  risk_score: number | null;
+}
+
 interface StuckJob {
   id: string;
   last_error: string | null;
@@ -101,6 +121,7 @@ export default async function CasePage({
     auditResult,
     stuckResult,
     retryingResult,
+    siblingResult,
   ] = await Promise.all([
     pool.query<Application>(
       `select id, status, full_name, date_of_birth::text, address_line1,
@@ -183,12 +204,25 @@ export default async function CasePage({
         order by id`,
       [id],
     ),
+    // Other applications from the same person. Matched on the generated
+    // person_key, so the definition of "same person" lives in the database and
+    // both services get the identical answer.
+    pool.query<SiblingApplication>(
+      `select other.id, other.status, other.created_at::text, other.risk_score
+         from applications self
+         join applications other on other.person_key = self.person_key
+        where self.id = $1
+          and other.id <> self.id
+        order by other.created_at`,
+      [id],
+    ),
     ]);
 
   const application = appResult.rows[0];
   const snapshot = snapshotResult.rows[0];
   const stuckJobs = stuckResult.rows;
   const retryingJobs = retryingResult.rows;
+  const siblings = siblingResult.rows;
   if (!application) notFound();
 
   const verdict = decisionResult.rows.find(
@@ -276,6 +310,34 @@ export default async function CasePage({
               <br />
               {application.address_country}
             </dd>
+            {siblings.length > 0 && (
+              <>
+                <dt>Repeat applications</dt>
+                <dd>
+                  <strong>
+                    {siblings.length + 1} applications from this person
+                  </strong>
+                  <p className="dim small repeat-note">
+                    Same name and date of birth. Each was screened and decided
+                    separately — this is not one application processed more than
+                    once. Nothing here changes the score.
+                  </p>
+                  <ul className="repeat-list">
+                    {siblings.map((other) => (
+                      <li key={other.id}>
+                        <Link href={`/desk/${other.id}`}>
+                          {other.created_at.slice(0, 16)}
+                        </Link>{" "}
+                        <span className="mono dim">{other.status}</span>
+                        {other.risk_score !== null && (
+                          <span className="mono dim"> · score {other.risk_score}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </dd>
+              </>
+            )}
           </dl>
         </section>
 

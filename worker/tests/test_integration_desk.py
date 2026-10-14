@@ -27,6 +27,9 @@ from screening import sources  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DESK_ACTION = REPO_ROOT / "web" / "src" / "app" / "desk" / "[id]" / "actions.ts"
+#: The decision transaction itself, extracted 2026-10-14 so the synthetic
+#: reviewer runs through the same lock and the same guards as an officer.
+DECISION_LIB = REPO_ROOT / "web" / "src" / "lib" / "decisions.ts"
 
 
 def decide_like_the_desk(conn, application_id: str, officer: str, outcome: str) -> dict:
@@ -193,16 +196,37 @@ def test_the_desk_lock_has_not_quietly_become_skip_locked():
     database is not harmed by it. Reading the file is the honest alternative to
     pretending it is covered.
     """
-    # Comments stripped first — the file EXPLAINS skip locked at length, so a
+    # WHERE THE LOCK LIVES MOVED, and this test caught it.
+    #
+    # On 2026-10-14 the decision transaction was extracted from the desk's
+    # server action into lib/decisions.ts, so the synthetic reviewer would run
+    # through exactly the same checks. This guard was still reading the action
+    # and passed by finding nothing, which is the precise failure mode it
+    # exists to prevent — a check that has quietly stopped checking. It now
+    # reads whichever file holds the transaction and fails if the lock is in
+    # neither.
+    #
+    # Comments stripped first: both files EXPLAIN skip locked at length, so a
     # naive search finds the prose rather than the query.
-    code = re.sub(r"//.*", "", DESK_ACTION.read_text(encoding="utf-8")).lower()
+    sources = {
+        path.name: re.sub(r"//.*", "", path.read_text(encoding="utf-8")).lower()
+        for path in (DESK_ACTION, DECISION_LIB)
+        if path.exists()
+    }
+    assert sources, "neither the desk action nor lib/decisions.ts was found"
 
-    assert "for update" in code, "the desk action no longer locks the row at all"
-    assert "skip locked" not in code, (
-        "the desk action uses SKIP LOCKED. The database would still permit only "
-        "one decision, but the losing officer would be told the case does not "
-        "exist instead of who decided it."
+    locking = [name for name, code in sources.items() if "for update" in code]
+    assert locking, (
+        "nothing in the decision path locks the application row any more — "
+        f"looked in {sorted(sources)}"
     )
+
+    for name, code in sources.items():
+        assert "skip locked" not in code, (
+            f"{name} uses SKIP LOCKED in the decision path. The database would "
+            "still permit only one decision, but the losing officer would be "
+            "told the case does not exist instead of who decided it."
+        )
 
 
 # ---------------------------------------------------------------------------

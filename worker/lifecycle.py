@@ -37,7 +37,11 @@ from datetime import datetime
 
 Status = str
 
-#: Ordered for display and for reasoning about direction.
+#: The happy path, ordered for display and for reasoning about direction.
+#:
+#: Only these five are a progression. The off-ramps below are NOT members,
+#: because "further along" is meaningless for them — they are exits, and
+#: `stage_of` deliberately returns -1 for one rather than implying a position.
 LIFECYCLE: tuple[Status, ...] = (
     "started",
     "submitted",
@@ -46,13 +50,38 @@ LIFECYCLE: tuple[Status, ...] = (
     "decided",
 )
 
-#: What each stage means, so the vocabulary stays fixed.
+#: Terminal exits for applications that can never reach a decision.
+#:
+#: NEITHER IS A REJECTION. A rejection asserts a risk finding about a person;
+#: in both of these there is no finding. The first means we could not obtain
+#: the evidence, the second that the applicant never supplied it. Added
+#: 2026-10-14 by migration 027 — before that these applications had nowhere to
+#: go and were counted as "in flight" indefinitely, 85 of them on production.
+TERMINAL_OFF_RAMPS: tuple[Status, ...] = (
+    "verification_unavailable",
+    "expired",
+)
+
+#: Every status the column may hold. This, not LIFECYCLE, is the vocabulary —
+#: and the stats page must account for every member of it, or applications
+#: disappear from the totals.
+ALL_STATUSES: tuple[Status, ...] = LIFECYCLE + TERMINAL_OFF_RAMPS
+
+#: What each status means, so the vocabulary stays fixed.
 MEANING: dict[Status, str] = {
     "started": "created; the applicant has not begun verification",
     "submitted": "a verification session exists; the applicant is in the vendor's flow",
     "checking": "the applicant has finished; we are waiting for the vendor's verdict",
     "screening": "the vendor's verdict is in; our own checks are running",
     "decided": "a decision has been recorded",
+    "verification_unavailable": (
+        "closed: the vendor has no record of the verification session, "
+        "confirmed over repeated sweeps. Not a rejection"
+    ),
+    "expired": (
+        "closed: verification was never begun and the abandonment window "
+        "passed. A process timeout, not a rejection"
+    ),
 }
 
 #: The permitted transitions.
@@ -90,12 +119,20 @@ MEANING: dict[Status, str] = {
 #: Note what is absent: NOTHING reaches 'decided' except 'screening'. That is
 #: not tidiness, it is a compliance rule — you may not decide on a customer you
 #: have not screened. 'decided' is terminal.
+#: Note also what the off-ramps do NOT do: neither appears as a target of
+#: 'screening', and neither has an outgoing edge. So nothing reaches 'decided'
+#: except from 'screening' — still exactly one route in — and an application
+#: that has taken an off-ramp is finished. A person who wants to proceed starts
+#: a new application, which the person_key linking (migration 028) makes
+#: visible to the reviewer rather than hiding.
 ALLOWED_TRANSITIONS: dict[Status, frozenset[Status]] = {
-    "started": frozenset({"submitted", "checking", "screening"}),
-    "submitted": frozenset({"checking", "screening"}),
-    "checking": frozenset({"screening"}),
+    "started": frozenset({"submitted", "checking", "screening", "expired"}),
+    "submitted": frozenset({"checking", "screening", "verification_unavailable"}),
+    "checking": frozenset({"screening", "verification_unavailable"}),
     "screening": frozenset({"decided"}),
     "decided": frozenset(),
+    "verification_unavailable": frozenset(),
+    "expired": frozenset(),
 }
 
 #: The vendor's status vocabulary mapped onto ours.

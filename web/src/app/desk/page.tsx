@@ -15,6 +15,19 @@ interface Row {
   risk_signals: { signals?: { code: string; points: number; reason: string }[] } | null;
   referred_at: string;
   waiting_seconds: number;
+  /**
+   * How many applications exist from this person in total, including this one.
+   *
+   * Exact match on normalised name and date of birth, via the `person_key`
+   * generated column (migration 028). Shown so that several rows with the same
+   * name read as "this person applied repeatedly" rather than as "the system
+   * processed one application several times" — which is what four identical
+   * Sergey Ivanov rows looked like, and is the one thing this project claims
+   * cannot happen.
+   *
+   * Display only. It is not a risk signal and does not reach scoring.
+   */
+  person_applications: number;
 }
 
 /**
@@ -33,7 +46,9 @@ async function pendingCases(): Promise<Row[]> {
             a.risk_score,
             a.risk_signals,
             r.decided_at::text as referred_at,
-            extract(epoch from (now() - r.decided_at))::int as waiting_seconds
+            extract(epoch from (now() - r.decided_at))::int as waiting_seconds,
+            (select count(*) from applications p
+              where p.person_key = a.person_key)::int as person_applications
        from applications a
        join decisions r
          on r.application_id = a.id
@@ -87,6 +102,7 @@ export default async function QueuePage() {
     score: row.risk_score ?? 0,
     reason: topReason(row),
     waitingSeconds: row.waiting_seconds,
+    personApplications: row.person_applications,
   }));
 
   const oldest = rows[0]?.waitingSeconds ?? 0;

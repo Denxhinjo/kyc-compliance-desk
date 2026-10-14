@@ -15,8 +15,11 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from lifecycle import (
+    ALL_STATUSES,
     ALLOWED_TRANSITIONS,
     LIFECYCLE,
+    MEANING,
+    TERMINAL_OFF_RAMPS,
     VENDOR_STATUS_TO_LIFECYCLE,
     Outcome,
     evaluate_vendor_result,
@@ -48,19 +51,76 @@ def evaluate(
 
 
 def test_every_state_has_transition_rules():
-    assert set(ALLOWED_TRANSITIONS) == set(LIFECYCLE)
+    """Every status the column may hold, not merely every lifecycle stage.
+
+    ALL_STATUSES rather than LIFECYCLE since migration 027: a status with no
+    entry here would be one the worker cannot reason about at all.
+    """
+    assert set(ALLOWED_TRANSITIONS) == set(ALL_STATUSES)
+
+
+def test_every_state_has_a_stated_meaning():
+    """Adding a status without saying what it means is how vocabulary rots."""
+    assert set(MEANING) == set(ALL_STATUSES)
 
 
 def test_every_target_is_a_real_state():
     for source, targets in ALLOWED_TRANSITIONS.items():
         for target in targets:
-            assert target in LIFECYCLE, f"{source} -> {target} is not a state"
+            assert target in ALL_STATUSES, f"{source} -> {target} is not a state"
 
 
 def test_no_transition_ever_goes_backwards():
+    """Within the happy path, every edge moves forward.
+
+    Restricted to targets inside LIFECYCLE because the off-ramps are not stages
+    and have no position — `stage_of` returns -1 for them deliberately. Their
+    own invariants are the two tests below, which are stronger than a position
+    comparison would be.
+    """
     for source, targets in ALLOWED_TRANSITIONS.items():
+        if source in TERMINAL_OFF_RAMPS:
+            continue
         for target in targets:
+            if target in TERMINAL_OFF_RAMPS:
+                continue
             assert stage_of(target) > stage_of(source), f"{source} -> {target}"
+
+
+def test_the_off_ramps_are_terminal():
+    """An exit with an exit is not an exit.
+
+    If either of these ever gained an outgoing edge, an application could be
+    revived out of a closed state — and the only interesting place to revive it
+    to would be 'decided', which is the one thing that must never be reachable
+    except from 'screening'.
+    """
+    for off_ramp in TERMINAL_OFF_RAMPS:
+        assert ALLOWED_TRANSITIONS[off_ramp] == frozenset(), off_ramp
+
+
+def test_an_off_ramp_is_never_reachable_from_screening():
+    """Once the vendor's verdict is in, neither off-ramp applies.
+
+    Reaching 'screening' means the evidence arrived. "The vendor has no record
+    of the session" is then not a true statement, and "never begun" plainly is
+    not either. A case stuck in screening is a parked job, which migration 023
+    handles by blocking the desk — not by closing the application.
+    """
+    for off_ramp in TERMINAL_OFF_RAMPS:
+        assert off_ramp not in ALLOWED_TRANSITIONS["screening"], off_ramp
+
+
+def test_neither_off_ramp_is_a_decision():
+    """The distinction the statuses exist to make.
+
+    Closing for missing evidence must never be recorded as a rejection: a
+    rejection asserts a risk finding, and there is none. This asserts the
+    structural half — no off-ramp leads to 'decided', so no off-ramp can
+    acquire a decision row by transition.
+    """
+    for off_ramp in TERMINAL_OFF_RAMPS:
+        assert "decided" not in ALLOWED_TRANSITIONS[off_ramp], off_ramp
 
 
 def test_decided_is_terminal():

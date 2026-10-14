@@ -1,8 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { withTransaction } from "@/lib/db";
-import { logEvent } from "@/lib/audit";
+import { createApplicationRecord } from "@/lib/applications";
 import { validateApplicant } from "@/lib/validation";
 
 /**
@@ -35,39 +34,11 @@ export async function createApplication(
 
   const applicant = result.value;
 
-  const applicationId = await withTransaction(async (client) => {
-    const { rows } = await client.query<{ id: string }>(
-      `insert into applications
-         (status, full_name, date_of_birth, address_line1, address_line2,
-          address_city, address_postcode, address_country)
-       values ('started', $1, $2, $3, $4, $5, $6, $7)
-       returning id`,
-      [
-        applicant.fullName,
-        applicant.dateOfBirth,
-        applicant.addressLine1,
-        applicant.addressLine2,
-        applicant.addressCity,
-        applicant.addressPostcode,
-        applicant.addressCountry,
-      ],
-    );
-    const id = rows[0].id;
-
-    // Same transaction as the insert. An application that exists with no record
-    // of its creation is exactly the gap the audit log exists to close.
-    await logEvent(client, {
-      applicationId: id,
-      actor: "system:web",
-      action: "application.created",
-      details: {
-        channel: "web_form",
-        country: applicant.addressCountry,
-      },
-    });
-
-    return id;
-  });
+  // The insert and its audit row live in lib/applications.ts rather than here,
+  // because the continuous seeder has to create applications through exactly
+  // this code rather than through a second copy of it. See the note in that
+  // file on why a reimplementation was the wrong answer.
+  const applicationId = await createApplicationRecord(applicant);
 
   // redirect() works by throwing a special error that Next.js catches. It must
   // therefore be called OUTSIDE the transaction callback — inside, the

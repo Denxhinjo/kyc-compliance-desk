@@ -3465,3 +3465,202 @@ applies — the superseded row stays readable, the superseding row says why, and
 the history of the disagreement survives instead of being replaced by its
 resolution. It wants designing properly before it is built, not improvising the
 first time somebody needs it.
+
+---
+
+## Three symptoms that each looked like the bug they were not
+
+The live demo showed three things that contradicted the project's central
+claim. All three were worth more than any feature, because a visitor who
+notices one concludes the claim is false — and in two cases out of three the
+claim was perfectly intact and the demo was simply unable to say so.
+
+Diagnosed before anything was changed, which turned out to matter: the first
+symptom needed no fix to the thing it appeared to be about.
+
+### 1. Four identical Sergey Ivanovs: not a duplicate-processing bug
+
+The queue showed four rows with the same name, the same date of birth, the same
+score of 60 and the same sanctions match. That is exactly what duplicate
+processing looks like, and duplicate processing is the thing this project
+spends most of its effort proving cannot happen.
+
+**It had not happened.** Five applications existed, not four — one never left
+`started` — with five distinct ids, five distinct vendor sessions, five
+separate screenings and exactly one decision each. Every one carried a single
+`application.created` event with `"channel": "web_form"` and **no** `seeded`
+flag, so they came from the public form, not the seeder: a human submitted the
+same details five times between 20:13 and 21:00 on 2026-09-23.
+
+Checked across the whole dataset rather than just those rows: **zero**
+applications have been screened more than once, and **zero** have more than one
+terminal verdict. The 119 applications with two decision rows are all
+`referred` then a verdict, which migration 007 permits deliberately.
+
+So the defect was in the display. The queue had no way to say "this person
+applied five times", and without that the rows are indistinguishable from a bug.
+
+**The fix is display only.** Migration 028 adds a `person_key` generated column
+— normalised name plus date of birth — and the queue and case page say "N
+applications from this person" with links and timestamps. Nothing is merged,
+nothing is auto-decided, no score changes.
+
+Exact match only, no fuzzy matching, and the direction of the error is the
+point. A sanctions match may be approximate because a human judges every one;
+this is shown to a reviewer as a statement of fact with no second check in
+front of it, so a false positive would assert in a case file that two different
+applicants are one person. The rule therefore errs the other way: two records
+that really are one person but spell the name differently simply do not link.
+Several tests assert that failure direction on purpose, because someone will
+eventually want to improve it.
+
+### 2. 85 applications in flight: two populations, one real defect
+
+Grouped, they were 47 at `started` with no vendor session, 28 at `submitted`
+and 10 at `checking`, aged 19 to 55 days.
+
+**The 47 were not a defect.** The sweeper excludes them and says why in its own
+docstring: with no session id there is nothing to ask the vendor about. They are
+waiting on the applicant.
+
+**The 38 with sessions were the real finding, and the cause was not what it
+looked like.** The sweeper was scheduled and running — 28 completed jobs, next
+one queued, no errors. Its selection query matched all 38 correctly. It asked
+the simulator about every one and the simulator answered **404**, because the
+bulk seeder had written `vendor_applicant_id` as a random UUID without ever
+creating a session: only 5 simulator sessions existed in total, all from real
+web traffic.
+
+And then the sweeper logged a line and moved on. Asking the vendor can end
+three ways — a result, unreachable, or *no record of that session* — and only
+the first two had anywhere to go. The third is terminal information and it was
+being discarded, every run, for three weeks.
+
+Compounding it, `sweep.completed` was written only `if applied or unreachable`,
+so the commonest outcome wrote **nothing at all**. Three weeks of correct
+sweeps left zero rows, and from outside a working sweeper was indistinguishable
+from a stopped one. Three `sweep.completed` rows existed in total, all from
+2026-09-23, each reporting 25 unreachable — from before `PUBLIC_BASE_URL` was
+set on the worker, when the simulator genuinely could not be reached.
+
+A third problem sat underneath: the batch is capped at 25 and the order was
+`updated_at`, which a sweep that resolves nothing never touches. So the same
+oldest 25 were examined on every run and **13 were never examined once**.
+
+**The fix, all four parts.** Each "no record" answer writes a
+`vendor.session_not_found` audit row. Three such answers spanning at least an
+hour close the application as `verification_unavailable`, counted **from the
+audit log** rather than a column, so the escalation can be re-derived and
+defended months later rather than resting on a counter anyone could reset
+without trace. `sweep.completed` is written on every run with a `not_found`
+count. And the batch now orders by when each application was last asked about,
+from that same audit history, so the rotation is fair and every qualifying
+application is examined eventually.
+
+Both conditions are required, and each alone admits a failure: three answers a
+minute apart is one broken deploy of the simulator, one answer an hour ago is
+not a pattern.
+
+### 3. Activity stops on 23 September: nothing was scheduled to continue it
+
+`seed.py` is a one-off CLI script that BACKDATES — `sample_arrivals` spreads
+arrivals over the weeks *before* the day it runs. Production was seeded once,
+by hand, with `--count 400 --weeks 5 --seed 20260923`, and the seed value
+records the date. Seeded applications span 2026-08-19 to 2026-09-23 and stop
+dead, because nothing was ever scheduled to continue them. The only automated
+`seed.py` runs are in CI, against throwaway databases.
+
+**The fix is a separate forward-only entry point**, `worker/trickle.py`, on an
+hourly GitHub Actions schedule, 0–3 applicants a run averaging about 28 a day.
+`seed.py` is untouched, including its refusal to run twice — that guard is
+correct, and a second run would double an append-only history.
+
+## Not a rejection, and why that needed two new statuses
+
+Both new terminal statuses exist because the alternative was to record
+something false.
+
+`verification_unavailable` means the verification session cannot be resolved.
+`expired` means verification was never begun. **Neither is a rejection.** A
+rejection asserts a risk finding about a person; in both of these there is no
+finding — in one the evidence could not be obtained, in the other it was never
+supplied. Recording either as a refusal would invent an adverse outcome out of
+a vendor's data loss or a process timeout, which on a real person is a
+reportable decision nobody made.
+
+Both are terminal, neither is reachable from `screening`, and neither leads to
+`decided` — so the compliance rule that nothing is decided without being
+screened still has exactly one route in, and the test that asserts it is
+unchanged.
+
+## Every application is counted somewhere, and the hole that found
+
+The rule for this round was that no application may silently disappear from the
+totals: processed plus in flight plus awaiting review plus any new states must
+equal created, with a test enforcing it.
+
+Adding the two statuses was the easy half. Writing the test found a
+**pre-existing** hole that had nothing to do with them.
+
+The webhook moves an application to `screening` and enqueues the scoring as a
+*separate job*. Between those two transactions the application sits at
+`screening` with no decision row — so it satisfied neither "Awaiting review",
+which requires a referral, nor "Still in flight", which stops at `checking`.
+It was counted nowhere. Usually zero rows, invisible on a quiet demo, and
+guaranteed to appear under load.
+
+The stats page now has a "Being screened" line for exactly that state, so the
+two `screening` lines are complements and cover it exactly.
+
+**The test that found it was itself inadequate**, which is the part worth
+recording. The first version summed the lines over the whole table — and passes
+vacuously on an empty database, where every line reads zero and any partition
+holds, including a broken one. Confirmed by counterfactual: deleting a whole
+line and re-running on a freshly rebuilt schema still passed. It is now paired
+with a test that builds one application in **every** state and asserts each
+line counts exactly its own, which fails immediately when a line is removed.
+A check that cannot fail when it matters is the defect this project has now
+recorded five times.
+
+## PROPOSED, NOT BUILT: repeat applications as a risk factor
+
+`person_key` is display only and scoring does not read it. A test asserts that
+by reading `scoring.py` and `screening_handler.py` and failing if either so
+much as mentions the column.
+
+Making "has applied before" affect a score is a **policy change**, not a
+feature, and it needs a decision that is not mine:
+
+**What it would mean.** Several applications from one person is a documented
+pattern in both directions. It can be someone retrying after a failed document
+check, which is ordinary and innocent and the common case. It can also be
+someone probing for the combination of details that gets through, which is the
+textbook approach to defeating an onboarding control — and the five Ivanov
+submissions in 47 minutes are shaped exactly like it, though in that instance
+they were a developer testing the form.
+
+**Why it cannot be done quietly.** Scoring reading the column would change
+outcomes with nothing in the audit record to explain them. The whole
+auditability package rests on a decision naming the ruleset version that
+produced it and that version's contents being recorded in full. So this needs:
+
+- a new ruleset version, with the points written into the `rulesets` table
+- a threshold: how many applications, within what window, before it scores
+- a judgement on whether a *rejected* prior application should weigh more than
+  an abandoned one, which is the question with the real consequences
+- tests that the points appear in `risk_signals` with a readable reason, like
+  every other signal
+
+**What I would recommend if asked**, and this is a recommendation rather than a
+decision: a small number of points for three or more applications inside 30
+days, enough to move a borderline case into review and never enough to reject
+on its own — the same shape as the PEP rule, and for the same reason. Being a
+repeat applicant is not evidence of wrongdoing, and de-risking someone for
+retrying a failed document check is the behaviour regulators criticise. What it
+is worth is a human looking.
+
+**Also deliberately not built:** refusing a second application from the same
+person at submission time. A legitimate second attempt after a failed
+verification is the common case, and blocking it would be a product decision
+with real consequences for real people — not something to acquire as a side
+effect of adding a display feature.

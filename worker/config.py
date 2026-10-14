@@ -107,6 +107,41 @@ SWEEP_STUCK_MINUTES = _float("SWEEP_STUCK_MINUTES", "10")
 # main.py checks the relationship at boot and complains if it stops holding.
 SWEEP_BATCH_SIZE = _int("SWEEP_BATCH_SIZE", "25")
 
+# --- Resolving applications that can never progress -------------------------
+
+# When the vendor answers "I have no record of that session", how many such
+# answers, spread over how long, before the application is closed as
+# verification_unavailable.
+#
+# BOTH conditions, because each alone admits a failure mode. Three answers
+# within one minute is one bad deploy of the simulator, not a vendor that has
+# genuinely lost the session -- so the span matters. One answer an hour ago is
+# not a pattern -- so the count matters. Together they say: we asked
+# repeatedly, over a period long enough for a transient fault to have cleared,
+# and got the same answer every time.
+#
+# Counted from `vendor.session_not_found` rows in audit_events, never from a
+# column on the application. The audit log is append-only, so the escalation
+# can be re-derived and defended from history months later; a counter can be
+# reset by anyone with an UPDATE and leaves no trace of having been.
+SESSION_NOT_FOUND_CLOSE_AFTER = _int("SESSION_NOT_FOUND_CLOSE_AFTER", "3")
+SESSION_NOT_FOUND_MIN_SPAN_HOURS = _float("SESSION_NOT_FOUND_MIN_SPAN_HOURS", "1")
+
+# How long an application may sit in 'started' -- created, but the applicant
+# never began verification and so no vendor session exists -- before it is
+# closed as 'expired'.
+#
+# A PROCESS TIMEOUT, NOT A RISK DECISION. There is no adverse finding about
+# anybody here: the applicant simply never came back. The sweeper cannot help
+# these, and says so in its own docstring -- with no session id there is
+# nothing to ask the vendor about -- so without this they stayed "in flight"
+# indefinitely. Production had 47 of them, aged 19 to 53 days, on 2026-10-14.
+#
+# Thirty days is a demo's judgement, not a regulatory period. A real firm would
+# set this from its own onboarding policy, and would probably send a reminder
+# before it fired.
+ABANDONED_EXPIRY_DAYS = _float("ABANDONED_EXPIRY_DAYS", "30")
+
 # --- Screening --------------------------------------------------------------
 
 # 'synthetic' | 'ofac' | 'opensanctions'.

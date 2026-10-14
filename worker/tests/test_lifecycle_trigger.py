@@ -26,7 +26,7 @@ import pytest
 
 psycopg = pytest.importorskip("psycopg")
 
-from lifecycle import ALLOWED_TRANSITIONS, LIFECYCLE  # noqa: E402
+from lifecycle import ALL_STATUSES, ALLOWED_TRANSITIONS  # noqa: E402
 
 #: Postgres' SQLSTATE for RAISE ... USING errcode = 'restrict_violation'.
 RESTRICT_VIOLATION = "23001"
@@ -158,7 +158,7 @@ def test_every_state_in_the_table_is_a_known_status(conn):
             "union select to_status from application_transitions"
         )
         states = {row[0] for row in cur.fetchall()}
-    assert states <= set(LIFECYCLE)
+    assert states <= set(ALL_STATUSES)
 
 
 # ---------------------------------------------------------------------------

@@ -1566,3 +1566,44 @@ pre {
   padding-left: var(--space-3);
   white-space: pre-wrap;
 }
+
+/* --- Repeat applications --------------------------------------------------
+
+   Shown when several applications share a normalised name and date of birth
+   (the `person_key` generated column, migration 028).
+
+   Deliberately NEUTRAL, not a risk colour. Four identical names in the queue
+   read as a duplicate-processing bug unless something says otherwise, so this
+   exists to remove that ambiguity — but "has applied before" is not a finding
+   about anybody, and giving it the amber of a risk flag would state something
+   the scoring does not. If repeat applications ever do become a risk factor
+   that is a new rules version, and it would show up in the flags panel with
+   its points, not here. ---------------------------------------------------- */
+
+.repeat-badge {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  margin-left: var(--space-2);
+  padding: 1px var(--space-2);
+  white-space: nowrap;
+}
+
+.repeat-note {
+  margin: var(--space-1) 0 var(--space-2);
+  max-width: 48ch;
+}
+
+.repeat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.repeat-list li {
+  font-size: var(--text-sm);
+  padding: 1px 0;
+}

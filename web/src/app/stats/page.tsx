@@ -35,6 +35,9 @@ interface Totals {
   approved: number;
   rejected: number;
   in_flight: number;
+  verification_unavailable: number;
+  expired: number;
+  being_screened: number;
 }
 
 interface Latency {
@@ -73,10 +76,55 @@ async function totals(): Promise<Totals> {
        (select count(*) from decisions where outcome = 'approved')::int as approved,
        (select count(*) from decisions where outcome = 'rejected')::int as rejected,
        (select count(*) from applications
-         where status in ('started','submitted','checking'))::int as in_flight`,
+         where status in ('started','submitted','checking'))::int as in_flight,
+       (select count(*) from applications
+         where status = 'verification_unavailable')::int
+           as verification_unavailable,
+       (select count(*) from applications
+         where status = 'expired')::int as expired,
+       -- Screening started, no referral recorded yet. A brief state, and the
+       -- one that used to fall through the accounting: the webhook moves an
+       -- application to 'screening' and enqueues the scoring as a SEPARATE
+       -- job, so between those two transactions it is at 'screening' with no
+       -- decision row -- counted by neither 'Awaiting review', which requires
+       -- a referral, nor 'Still in flight', which stops at 'checking'.
+       --
+       -- Usually zero. It is on the page anyway because the rule is that
+       -- every application is counted somewhere, and a figure that is only
+       -- ever wrong under load is the hardest kind to notice.
+       (select count(*) from applications a
+         where a.status = 'screening'
+           and not exists (select 1 from decisions d
+                            where d.application_id = a.id
+                              and d.outcome = 'referred'))::int as being_screened`,
   );
   return rows[0];
 }
+
+/*
+ * EVERY APPLICATION IS COUNTED ON EXACTLY ONE LINE OF THIS PAGE.
+ *
+ * The five application-counting figures partition `applications` by status:
+ *
+ *   Processed                 decided
+ *   Awaiting review           screening, with a referral and no verdict
+ *   Being screened            screening, no referral yet
+ *   Still in flight           started, submitted, checking
+ *   Verification unavailable  verification_unavailable
+ *   Expired                   expired
+ *
+ * The two 'screening' lines are complements, so together they cover it
+ * exactly. Splitting them is what closed the one real gap here: scoring runs
+ * as a separate job from the status change, so an application sits briefly at
+ * 'screening' with no decision row and was previously counted nowhere.
+ *
+ * which is every member of lifecycle.ALL_STATUSES and nothing twice. Adding a
+ * status without adding a line here would make applications vanish from the
+ * totals while every individual figure stayed true, which is the quietest kind
+ * of wrong a dashboard can be. Two tests guard it: one asserts the five
+ * buckets partition the table with no gaps and no overlaps, and one reads this
+ * file and fails if a status exists that it never mentions.
+ */
 
 async function latency(): Promise<Latency> {
   // percentile_cont interpolates between the two middle values, which is the
@@ -272,6 +320,25 @@ export default async function StatsPage() {
           label="Still in flight"
           value={total.in_flight.toLocaleString()}
           note="created but not yet through verification — not counted as processed"
+        />
+
+        <Stat
+          label="Verification unavailable"
+          value={total.verification_unavailable.toLocaleString()}
+          note="closed: the provider has no record of the verification session. Not a rejection"
+        />
+
+        <Stat
+          label="Expired"
+          value={total.expired.toLocaleString()}
+          note="closed: verification was never begun. A process timeout, not a rejection"
+        />
+
+        <Stat
+          label="Being screened"
+          value={total.being_screened.toLocaleString()}
+          note="our checks are running — not yet referred or decided. Usually zero"
+          muted={total.being_screened === 0}
         />
       </div>
 

@@ -10,6 +10,8 @@ export interface QueueRow {
   score: number;
   reason: string;
   waitingSeconds: number;
+  /** Total applications from this person, including this one. 1 means unique. */
+  personApplications: number;
 }
 
 /**
@@ -88,7 +90,21 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
               <td>
                 <span className={`score ${scoreClass(row.score)}`}>{row.score}</span>
               </td>
-              <td className="col-name">{row.name}</td>
+              <td className="col-name">
+                {row.name}
+                {/* Only when there is more than one, and deliberately plain:
+                    this is a fact about the applicant's history, not a flag
+                    about their risk. The case page lists the others with
+                    their dates. */}
+                {row.personApplications > 1 && (
+                  <span
+                    className="repeat-badge"
+                    title={`${row.personApplications} applications from this person (same name and date of birth). Each was screened separately.`}
+                  >
+                    {row.personApplications} applications
+                  </span>
+                )}
+              </td>
               <td className="mono dim">{row.country}</td>
               {/* Clamped to one line so every row is the same height. The full
                   sentence is here on hover and printed in full on the case

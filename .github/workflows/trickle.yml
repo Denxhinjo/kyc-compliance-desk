@@ -1,0 +1,144 @@
+name: trickle
+
+# The continuous seeder: a few synthetic applicants an hour, so the demo looks
+# like a system someone is using rather than a snapshot taken on one afternoon.
+#
+# WHAT IT FIXES
+#
+# Production was seeded once, by hand, on 23 September 2026 with
+# `seed.py --count 400 --weeks 5`. That script BACKDATES: it spreads arrivals
+# over the five weeks before the day it runs. So the decisions chart showed a
+# busy month ending abruptly on the day of the run, the oldest queue case aged
+# past 28 days, and the demo read as abandoned. Nothing was wrong with it; it
+# had simply stopped, because nothing was ever scheduled to continue it.
+#
+# WHY A SEPARATE WORKFLOW FROM drain.yml
+#
+# They fail for different reasons and a reader should be able to tell which
+# stopped. The drain is the worker's heartbeat and its failure means work is
+# not being processed; this only adds demo data, and its failure means the
+# demo looks stale while remaining entirely correct. Folding them together
+# would mean a seeding hiccup turning the worker's health signal red.
+#
+# ZERO SPEND. GitHub Actions minutes are free on a public repository, and the
+# job is one short Python process making one HTTP request. Nothing new is
+# provisioned.
+#
+# ONE PIECE OF CONFIGURATION IS NEEDED THAT DID NOT EXIST BEFORE.
+#
+# The repository had exactly two secrets, DRAIN_SECRET and DRAIN_URL. This
+# needs the WEB app's base url, and DRAIN_URL is not it -- that points at the
+# worker's function project, which is a different Vercel deployment. So the
+# base url has to be supplied.
+#
+# It is not actually a secret: it is the public address of a public demo, and
+# it is written in this repository's own documentation. A repository VARIABLE
+# is therefore the honest home for it, and this reads either:
+#
+#   gh variable set PUBLIC_BASE_URL --body "https://<the-web-app>.vercel.app"
+#   gh secret   set PUBLIC_BASE_URL --body "https://<the-web-app>.vercel.app"
+#
+# DRAIN_SECRET is reused as the seed endpoint's credential rather than a new
+# one being introduced. It is already the project's shared secret for
+# machine-to-machine calls, already held by GitHub Actions and by both Vercel
+# projects, and a second credential to configure is a second one to leave
+# unset. The endpoint refuses every request when it is unset, exactly as the
+# drain endpoint does.
+#
+# If neither the variable nor the secret is set, this job FAILS rather than
+# guessing a url.
+
+on:
+  schedule:
+    # Hourly, at ten past, deliberately offset from drain.yml's `0 * * * *`.
+    #
+    # Not a correctness requirement — the work is idempotent and the queue is
+    # safe under concurrency — but a drain and a trickle landing in the same
+    # minute makes two unrelated sets of log lines interleave in whichever one
+    # you are reading. Ten minutes apart also means the drain following this
+    # tick picks up its screening jobs promptly rather than an hour later.
+    - cron: "10 * * * *"
+  # So it can be run by hand when demoing, without waiting for the clock.
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "Applicants to create (blank = the usual weighted 0-3)"
+        required: false
+        type: string
+
+# One tick at a time. A backlog of ticks would arrive as a burst, which is the
+# opposite of a trickle.
+concurrency:
+  group: trickle
+  cancel-in-progress: false
+
+jobs:
+  trickle:
+    name: seed a few applicants
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # No dependency install. trickle.py imports seed.py for its synthetic
+      # name sources and otherwise uses only the standard library — no psycopg,
+      # because it holds no database credential and writes nothing directly.
+      # Everything it creates goes through the deployed app's own endpoints.
+      - name: Create applicants through the real pipeline
+        working-directory: worker
+        env:
+          # Variable or secret, whichever the operator chose. Neither set is a
+          # hard failure below, not a default.
+          PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL || secrets.PUBLIC_BASE_URL }}
+          DRAIN_SECRET: ${{ secrets.DRAIN_SECRET }}
+          COUNT: ${{ inputs.count }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${PUBLIC_BASE_URL}" ]; then
+            echo "PUBLIC_BASE_URL is set neither as a repository variable nor"
+            echo "as a repository secret. It is the public address of the web"
+            echo "app, for example https://example.vercel.app -- not DRAIN_URL,"
+            echo "which points at the worker's separate function deployment."
+            echo
+            echo '  gh variable set PUBLIC_BASE_URL --body "https://<the-web-app>.vercel.app"'
+            exit 1
+          fi
+          if [ -z "${DRAIN_SECRET}" ]; then
+            echo "DRAIN_SECRET is not set in repository secrets"
+            exit 1
+          fi
+
+          # trickle.py exits non-zero on an unset variable, an unreachable
+          # host, a non-2xx reply, or an applicant its own generator produced
+          # that the public form's validator then refused. All four should turn
+          # this run red rather than pass quietly: a seeder that silently does
+          # nothing is the failure this whole workflow exists to make visible.
+          if [ -n "${COUNT}" ]; then
+            python trickle.py --count "${COUNT}"
+          else
+            python trickle.py
+          fi
+
+      - name: Explain a failure
+        if: failure()
+        run: |
+          echo "The trickle did not complete."
+          echo
+          echo "Most likely, in order:"
+          echo "  1. DRAIN_SECRET in repository secrets no longer matches the"
+          echo "     DRAIN_SECRET environment variable on the web deployment."
+          echo "  2. PUBLIC_BASE_URL is wrong, or the deployment is down."
+          echo "  3. The database is unreachable or out of free-tier quota."
+          echo
+          echo "Nothing is damaged either way. This workflow only ADDS demo"
+          echo "data; no existing application, decision or audit row is touched"
+          echo "by it, and the next run starts from scratch rather than"
+          echo "resuming anything."
+          echo
+          echo "The /health page shows when this last succeeded."
