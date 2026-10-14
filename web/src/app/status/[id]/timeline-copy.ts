@@ -214,6 +214,33 @@ export function describeForApplicant(
     case "decision.recorded":
       return onDecision(details);
 
+    /*
+     * THE TWO CLOSURES, added when the off-ramps were. Without them an
+     * applicant whose case was closed saw a history that stopped at
+     * "Application started" and never said what became of it -- the panel
+     * above explained it, the record beneath did not.
+     *
+     * Worded so neither reads as a refusal, because neither is one. And
+     * `vendor.session_not_found` is deliberately NOT here: the individual
+     * failed lookups are the working-out, and three lines of "we asked the
+     * provider again" tells the applicant nothing the closure does not.
+     */
+    case "verification.unavailable":
+      return {
+        title: "Application closed",
+        detail:
+          "We could not confirm your identity session with our verification " +
+          "provider. No decision was made about you.",
+      };
+
+    case "application.expired":
+      return {
+        title: "Application closed",
+        detail:
+          "Identity verification was never started, so this application was " +
+          "closed. No decision was made about you.",
+      };
+
     // Everything else is internal: refused vendor results, sweeper runs,
     // retention passes. Not secrets exactly, but not this audience's business
     // either, and nothing is gained by showing them.

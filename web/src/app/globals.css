@@ -221,8 +221,12 @@ select,
 textarea {
   appearance: none;
   -webkit-appearance: none;
-  background: var(--surface-raised);
-  border: var(--border-width) solid var(--border);
+  /* White, with the CONTROL border rather than the hairline. On a light ground
+     a grey-filled box edged with a 1.3:1 hairline has no discernible boundary,
+     which on a form is not a style problem — it is someone not finding the
+     field. See the note on --border-control. */
+  background: var(--surface);
+  border: var(--border-width) solid var(--border-control);
   border-radius: var(--radius);
   color: var(--text);
   font-family: inherit;
@@ -236,7 +240,7 @@ textarea {
 input:hover,
 select:hover,
 textarea:hover {
-  border-color: var(--n-400);
+  border-color: var(--text-dim);
 }
 
 input:focus,
@@ -324,8 +328,8 @@ label {
 
 .button,
 .btn {
-  background: var(--n-800);
-  border: var(--border-width) solid var(--border);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border-control);
   border-radius: var(--radius);
   color: var(--text);
   cursor: pointer;
@@ -343,7 +347,7 @@ label {
 
 .button:hover,
 .btn:hover:not(:disabled) {
-  background: var(--n-700);
+  background: var(--surface-raised);
   text-decoration: none;
 }
 
@@ -423,7 +427,7 @@ label {
 }
 
 kbd {
-  background: var(--n-800);
+  background: var(--n-100);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius);
   color: var(--text-muted);
@@ -604,9 +608,9 @@ kbd {
 .skeleton {
   background: linear-gradient(
     90deg,
-    var(--n-850) 25%,
-    var(--n-800) 50%,
-    var(--n-850) 75%
+    var(--n-50) 25%,
+    var(--n-0) 50%,
+    var(--n-50) 75%
   );
   background-size: 200% 100%;
   border-radius: var(--radius);
@@ -1606,4 +1610,438 @@ pre {
 .repeat-list li {
   font-size: var(--text-sm);
   padding: 1px 0;
+}
+
+/* --- Landing --------------------------------------------------------------
+
+   The front door, and the only screen in the app that is allowed a filled
+   button. Everything here is in service of one decision: open the desk.
+
+   Centred rather than left-aligned, which is a departure from every other
+   screen. The rest of the app is a dense operations tool and left alignment is
+   what makes a column of data scannable; this page has no data, one action,
+   and about forty words, and left-aligning that against a 1200px viewport
+   leaves it stranded in the corner. ---------------------------------------- */
+
+.landing {
+  margin: 0 auto;
+  max-width: var(--width-prose);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+}
+
+.landing-eyebrow {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-label);
+  margin: 0 0 var(--space-4);
+  text-transform: uppercase;
+}
+
+/* The one place a size outside the four-step scale is justified, and it is
+   worth being explicit about why rather than quietly adding a fifth token.
+   --text-xl is 28px and sized for STAT VALUES in a dense grid; a headline is
+   the only element on its own screen. clamp() so it is not 36px on a phone. */
+.landing-headline {
+  font-size: clamp(1.75rem, 1.2rem + 2.4vw, 2.5rem);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.015em;
+  line-height: var(--leading-tight);
+  margin: 0 auto var(--space-4);
+  max-width: 18ch;
+}
+
+.landing-sub {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  margin: 0 auto var(--space-6);
+  max-width: 56ch;
+}
+
+.landing-cta {
+  margin-bottom: var(--space-6);
+}
+
+/* THE primary action. Filled accent, and there is exactly one of these in the
+   whole application — see the note on --accent in tokens.css. Bigger than a
+   standard button because it is the only thing on the screen to press, not
+   because bigger is better. */
+.button-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text-on);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  padding: var(--space-3) var(--space-5);
+}
+.button-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--accent-text-on);
+}
+
+.landing-note {
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  margin: var(--space-3) 0 0;
+}
+
+.landing-detail {
+  border-top: var(--border-width) solid var(--border);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  text-align: left;
+}
+.landing-detail h2 {
+  margin-top: 0;
+}
+.landing-detail p {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  margin: 0 0 var(--space-4);
+  max-width: 68ch;
+}
+
+.landing-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+}
+
+/* --- Desk: summary metrics ------------------------------------------------
+
+   A STRIP, not a row of cards. Four figures that give the queue context do not
+   each need a bordered panel with its own padding and shadow — that is the
+   look of a dashboard built to fill space, and it pushes the actual work below
+   the fold. One border, one row, and the numbers carry it. ------------------ */
+
+.metric-strip {
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: var(--space-4);
+}
+
+.metric {
+  border-left: var(--border-width) solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  /* min-width: 0 so a long value cannot push the grid wider than its track —
+     the fix this project already had to make once for the mobile layout. */
+  min-width: 0;
+}
+.metric:first-child {
+  border-left: none;
+}
+
+.metric-value {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+.metric-label {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+/* --- Desk: queue filters --------------------------------------------------- */
+
+.queue-filters {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.queue-search {
+  flex: 1 1 18rem;
+  max-width: 24rem;
+  min-width: 0;
+}
+
+.queue-band {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.queue-count {
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.queue-empty {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  padding: var(--space-5) var(--space-3);
+  text-align: center;
+}
+
+/* --- Progressive disclosure ------------------------------------------------
+
+   One pattern for every "the detail is here if you want it" on the site: the
+   decided table, raw event payloads, screening internals. A native <details>
+   rather than a React toggle, so it works before hydration and so the browser
+   handles the open state, the keyboard and find-in-page for free. ----------- */
+
+.disclosure {
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  margin: var(--space-4) 0;
+}
+
+.disclosure > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  gap: var(--space-2);
+  list-style: none;
+  padding: var(--space-3) var(--space-4);
+  user-select: none;
+}
+.disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+/* A disclosure triangle drawn in text, so it needs no asset and rotates with
+   the open state. */
+.disclosure > summary::before {
+  color: var(--text-dim);
+  content: "\25B8";
+  display: inline-block;
+  transition: transform var(--transition);
+}
+.disclosure[open] > summary::before {
+  transform: rotate(90deg);
+}
+.disclosure > summary:hover {
+  background: var(--surface-raised);
+}
+.disclosure[open] > summary {
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.disclosure-count {
+  background: var(--neutral-bg);
+  border-radius: var(--radius);
+  color: var(--neutral-text);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  padding: 1px var(--space-2);
+}
+
+.decided-disclosure .grid {
+  margin: 0;
+}
+
+/* Narrow: four metrics across is four unreadable columns on a phone. */
+@media (max-width: 720px) {
+  .metric-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .metric:nth-child(odd) {
+    border-left: none;
+  }
+  .metric:nth-child(n + 3) {
+    border-top: var(--border-width) solid var(--border);
+  }
+  .queue-search {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+  .queue-count {
+    margin-left: 0;
+  }
+}
+
+/* --- Desk navigation -------------------------------------------------------
+
+   Quiet. A nav bar on an operations tool is furniture: it has to say where you
+   are and let you leave, and then get out of the way of the work. White ground,
+   one hairline under it, and the current item marked by weight and a rule
+   rather than by a filled block of colour. ---------------------------------- */
+
+.desk-nav {
+  display: flex;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.desk-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.desk-nav-item {
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-3);
+  text-decoration: none;
+  transition: color var(--transition), border-color var(--transition);
+  white-space: nowrap;
+}
+.desk-nav-item:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+.desk-nav-item.current {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+/* --- Timeline: the raw event, when asked for -------------------------------
+
+   Replaces .t-details, which printed the payload inline on every row. The
+   record is unchanged and still complete; what changed is that reading a
+   history no longer means reading five lines of JSON to find two words.
+   -------------------------------------------------------------------------- */
+
+.t-raw {
+  /* flex-basis, not grid-column: .timeline li is a wrapping flex row, so this
+     is what puts the disclosure on its own line beneath the event. */
+  flex: 1 0 100%;
+  margin-top: var(--space-1);
+}
+
+.t-raw > summary {
+  color: var(--text-dim);
+  cursor: pointer;
+  display: inline-block;
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+  list-style: none;
+  text-transform: uppercase;
+  user-select: none;
+}
+.t-raw > summary::-webkit-details-marker {
+  display: none;
+}
+.t-raw > summary::before {
+  content: "\25B8 ";
+  display: inline-block;
+  transition: transform var(--transition);
+}
+.t-raw[open] > summary::before {
+  transform: rotate(90deg);
+}
+.t-raw > summary:hover {
+  color: var(--text);
+}
+
+.t-raw pre {
+  background: var(--surface-raised);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--text-xs);
+  margin: var(--space-2) 0 0;
+  max-height: 20rem;
+  overflow: auto;
+  padding: var(--space-3);
+}
+
+/* --- Analytics: grouping ---------------------------------------------------
+
+   Ten undifferentiated tiles made a reader scan all of them to find either
+   kind of answer. Two groups with a heading each: throughput and timing, then
+   the accounting. ---------------------------------------------------------- */
+
+.stat-group {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-6) 0 var(--space-3);
+}
+.stat-group:first-of-type {
+  margin-top: var(--space-5);
+}
+
+.stat-group-note {
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+/* The methodology note. Full text, one click away — it is the most useful
+   paragraph on the page for someone deciding whether to trust the numbers, and
+   the least useful for someone reading the numbers. */
+.method-disclosure .method-note {
+  border: none;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+}
+
+/* --- Applicant journey: the three steps ------------------------------------
+
+   Shown before the form rather than only once the applicant is inside the
+   process. A form that does not say how far it goes is a form people abandon
+   on the second field.
+
+   Numbered rather than a progress bar: three steps is a list, and a bar
+   implies a percentage the system cannot honestly give — step 2 ends whenever
+   the provider answers. ---------------------------------------------------- */
+
+.journey {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+}
+
+.journey-step {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  font-size: var(--text-sm);
+  gap: var(--space-2);
+}
+.journey-step + .journey-step::before {
+  color: var(--border-control);
+  content: "\2192";
+  margin-right: var(--space-1);
+}
+
+.journey-num {
+  align-items: center;
+  background: var(--neutral-bg);
+  border-radius: 50%;
+  color: var(--neutral-text);
+  display: inline-flex;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  height: 1.25rem;
+  justify-content: center;
+  width: 1.25rem;
+}
+
+.journey-step.now {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+.journey-step.now .journey-num {
+  background: var(--accent);
+  color: var(--accent-text-on);
 }

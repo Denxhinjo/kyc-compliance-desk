@@ -565,20 +565,89 @@ export default async function CasePage({
           to build, because the write would be refused.
         </p>
         <ol className="timeline">
-          {auditResult.rows.map((event) => (
-            <li key={event.id}>
-              <span className="t-time mono">{event.occurred_at.slice(0, 19)}</span>
-              <span className="t-action">{event.action}</span>
-              <span className="t-actor mono dim">{event.actor}</span>
-              {Object.keys(event.details).length > 0 && (
-                <code className="t-details">{JSON.stringify(event.details)}</code>
-              )}
-            </li>
-          ))}
+          {auditResult.rows.map((event) => {
+            const hasPayload = Object.keys(event.details).length > 0;
+            return (
+              <li key={event.id}>
+                <span className="t-time mono">
+                  {event.occurred_at.slice(0, 19)}
+                </span>
+                <span className="t-action">{describeEvent(event)}</span>
+                <span className="t-actor mono dim">{event.actor}</span>
+                {/* PROGRESSIVE DISCLOSURE.
+                    The payload used to print in full on every row, so reading
+                    a five-event history meant reading five lines of JSON to
+                    find the two words that mattered. It is still one click
+                    away and still complete -- an auditor needs the unvarnished
+                    record, and a pretty-printer that dropped a field would
+                    defeat the purpose of keeping one. */}
+                {hasPayload && (
+                  <details className="t-raw">
+                    <summary>Event data</summary>
+                    <pre>{JSON.stringify(event.details, null, 2)}</pre>
+                  </details>
+                )}
+              </li>
+            );
+          })}
         </ol>
       </section>
     </main>
   );
+}
+
+/**
+ * One line of plain English for an audit event.
+ *
+ * The dotted verb -- `vendor.result_applied` -- is the right name in the
+ * record and the wrong thing to read fifteen of. It stays visible in the
+ * payload behind each row; this is what the row itself says.
+ *
+ * UNRECOGNISED ACTIONS FALL BACK TO THE RAW NAME rather than to a generic
+ * phrase. An event type added later would otherwise render as "Updated" and
+ * read as though the system understood it, which is the same failure as the
+ * applicant status page showing a sentence it had not been given -- except
+ * here it misleads an auditor rather than an applicant.
+ */
+function describeEvent(event: { action: string; details: Record<string, unknown> }): string {
+  const detail = event.details as Record<string, string | number | undefined>;
+
+  switch (event.action) {
+    case "application.created":
+      return "Application submitted";
+    case "verification.session_created":
+      return "Identity verification started";
+    case "status.changed":
+      return detail.to === "screening"
+        ? "Provider returned a result — screening began"
+        : `Moved to ${String(detail.to ?? "a new state")}`;
+    case "screening.completed":
+      return `Screening completed — score ${String(detail.score ?? "?")}`;
+    case "decision.recorded":
+      /*
+       * OUTCOME FIRST, because `automatic` does not distinguish these three.
+       *
+       * A referral carries no `automatic` key at all -- 167 of them in the
+       * demo data -- so branching on that alone rendered "Decided by a
+       * reviewer" on an event written by the worker, for a case no reviewer
+       * had yet seen. Exactly the wrong thing to tell an auditor, and the same
+       * mistake as a status page printing a sentence it was never given.
+       */
+      if (detail.outcome === "referred") {
+        return "Referred for review — automation did not decide this";
+      }
+      return detail.automatic
+        ? `Decided automatically — ${String(detail.outcome ?? "")}`
+        : `Decided by a reviewer — ${String(detail.outcome ?? "")}`;
+    case "vendor.session_not_found":
+      return "Provider had no record of the verification session";
+    case "verification.unavailable":
+      return "Closed — verification could not be completed";
+    case "application.expired":
+      return "Closed — verification was never started";
+    default:
+      return event.action;
+  }
 }
 
 /**

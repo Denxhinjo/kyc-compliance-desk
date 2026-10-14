@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 export interface QueueRow {
@@ -24,10 +24,61 @@ export interface QueueRow {
  * decades, and officers arriving from other compliance software will try these
  * keys before reading any documentation.
  */
+/**
+ * The score bands offered as a filter.
+ *
+ * These are the RULESET'S OWN numbers, not invented buckets: under 20
+ * auto-approves and 80+ auto-rejects, so everything in this queue is 20-79 by
+ * construction and the only useful cut is within that band. Offering "low /
+ * medium / high" would be inventing a vocabulary the scoring does not use, and
+ * a reviewer who filtered by "high" would get cases the system does not call
+ * high.
+ */
+const BANDS = [
+  { value: "all", label: "Any score", test: () => true },
+  { value: "60", label: "60 and above", test: (s: number) => s >= 60 },
+  { value: "40", label: "40 to 59", test: (s: number) => s >= 40 && s < 60 },
+  { value: "20", label: "20 to 39", test: (s: number) => s < 40 },
+] as const;
+
 export function QueueTable({ rows }: { rows: QueueRow[] }) {
   const router = useRouter();
   const [selected, setSelected] = useState(0);
+  const [query, setQuery] = useState("");
+  const [band, setBand] = useState<string>("all");
   const containerRef = useRef<HTMLDivElement>(null);
+
+  /*
+   * Filtered in the browser, not by a round trip.
+   *
+   * The queue is capped at 200 rows by the query that loads it, so the whole
+   * set is already here and filtering it is a string comparison over a few
+   * hundred items. A server round trip per keystroke would add latency and a
+   * loading state to something that can be instant, and would need the page to
+   * become dynamic on search params for no gain.
+   *
+   * If the cap is ever raised past a few thousand this should move server-side.
+   */
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const matcher = BANDS.find((b) => b.value === band) ?? BANDS[0];
+    return rows.filter((row) => {
+      if (!matcher.test(row.score)) return false;
+      if (!needle) return true;
+      // Name or case id: a reviewer arriving from an email has the id, a
+      // reviewer arriving from a conversation has the name.
+      return (
+        row.name.toLowerCase().includes(needle) ||
+        row.id.toLowerCase().includes(needle)
+      );
+    });
+  }, [rows, query, band]);
+
+  // Keep the cursor inside the filtered list. Without this, filtering down to
+  // three rows while the cursor sits on row nine leaves Enter opening nothing.
+  useEffect(() => {
+    setSelected(0);
+  }, [query, band]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -37,20 +88,20 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
 
       if (event.key === "j" || event.key === "ArrowDown") {
         event.preventDefault();
-        setSelected((current) => Math.min(current + 1, rows.length - 1));
+        setSelected((current) => Math.min(current + 1, visible.length - 1));
       } else if (event.key === "k" || event.key === "ArrowUp") {
         event.preventDefault();
         setSelected((current) => Math.max(current - 1, 0));
       } else if (event.key === "Enter") {
         event.preventDefault();
-        const row = rows[selected];
+        const row = visible[selected];
         if (row) router.push(`/desk/${row.id}`);
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [rows, selected, router]);
+  }, [visible, selected, router]);
 
   // Keep the selected row on screen when moving by keyboard.
   useEffect(() => {
@@ -61,6 +112,36 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
 
   return (
     <div ref={containerRef}>
+      {/* Two controls, and no more. Every extra filter on an operations screen
+          is another thing to check before trusting that the list in front of
+          you is the whole list. */}
+      <div className="queue-filters">
+        <input
+          type="search"
+          className="queue-search"
+          placeholder="Search applicant or case ID"
+          aria-label="Search by applicant name or case ID"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <select
+          className="queue-band"
+          aria-label="Filter by risk score"
+          value={band}
+          onChange={(event) => setBand(event.target.value)}
+        >
+          {BANDS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <span className="queue-count" aria-live="polite">
+          {visible.length === rows.length
+            ? `${rows.length} ${rows.length === 1 ? "case" : "cases"}`
+            : `${visible.length} of ${rows.length}`}
+        </span>
+      </div>
       {/* Scrollable rather than squeezed. A dense operations table has a width
           below which it stops being readable; letting it scroll sideways keeps
           every column intact instead of crushing all of them. */}
@@ -76,7 +157,7 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => (
+          {visible.map((row, index) => (
             <tr
               key={row.id}
               data-index={index}
@@ -116,6 +197,24 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
           ))}
         </tbody>
       </table>
+      {/* An empty result from a filter is not an empty queue, and must not
+          look like one -- "the queue is clear" is a different and much better
+          piece of news than "your search matched nothing". */}
+      {visible.length === 0 && (
+        <p className="queue-empty">
+          No case matches those filters.{" "}
+          <button
+            type="button"
+            className="linkish"
+            onClick={() => {
+              setQuery("");
+              setBand("all");
+            }}
+          >
+            Clear filters
+          </button>
+        </p>
+      )}
       </div>
       <p className="keys">
         <kbd>j</kbd> <kbd>k</kbd> move · <kbd>↵</kbd> open case

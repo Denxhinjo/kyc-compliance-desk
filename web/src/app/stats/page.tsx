@@ -237,12 +237,19 @@ export default async function StatsPage() {
       <p className="crumb">
         <Link href="/">← Home</Link>
       </p>
-      <h1>Stats</h1>
+      <h1>Analytics</h1>
       <p className="sub">
         Every figure below is computed from the database on this request. Each
         one states what it was measured over.
       </p>
 
+      {/* TWO GROUPS, because these answer different questions and ten
+          undifferentiated tiles made a reader scan all of them to find either.
+          Throughput and latency are what an operations lead looks at; the
+          second group is the accounting -- where every application currently
+          sits -- and it exists because the rule is that no application may
+          disappear from the totals. Useful, and not the headline. */}
+      <h2 className="stat-group">Throughput and timing</h2>
       <div className="stat-grid">
         <Stat
           label="Processed"
@@ -306,6 +313,17 @@ export default async function StatsPage() {
           muted={!enoughData}
         />
 
+      </div>
+
+      <h2 className="stat-group">
+        Where every application is
+        <span className="stat-group-note">
+          These five account for all {total.applications.toLocaleString()} —
+          each application is counted on exactly one line, and a test enforces
+          it.
+        </span>
+      </h2>
+      <div className="stat-grid">
         <Stat
           label="Awaiting review"
           value={queue.pending.toLocaleString()}
@@ -351,11 +369,11 @@ export default async function StatsPage() {
       {enoughData &&
         lat.p90_seconds !== null &&
         lat.human_median_seconds !== null && (
-          <p className="method-note">
-            <strong>
-              Why the 90th percentile and the human median sit so close
-              together.
-            </strong>{" "}
+          <details className="disclosure method-disclosure">
+            <summary>
+              Why the 90th percentile and the human median sit so close together
+            </summary>
+            <p className="method-note">
             They measure different populations and are easy to misread against
             each other. {autoPercent}% of these decisions are automatic and
             finish in minutes, so the 90th percentile of <em>everything</em>{" "}
@@ -371,7 +389,8 @@ export default async function StatsPage() {
             whole population, while the human median answers &ldquo;how long
             does a reviewed case take?&rdquo;, and which of the two is larger
             moves with the mix rather than with how fast anyone is working.
-          </p>
+            </p>
+          </details>
         )}
 
       <h2>Decisions over time</h2>

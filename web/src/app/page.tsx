@@ -4,79 +4,63 @@ export const dynamic = "force-dynamic";
 
 const REPO = "https://github.com/Denxhinjo/kyc-compliance-desk";
 
+/**
+ * The front door.
+ *
+ * ONE job: say what this is and get the visitor into the desk. It used to
+ * offer five links of equal weight — desk, apply, stats, source, readme — which
+ * is not a choice so much as an invitation to leave. A first screen with five
+ * CTAs has none.
+ *
+ * So: name, one line on what it does, one line on why it is hard, one button.
+ * Everything else moves below the fold or into the app's own navigation, where
+ * someone who wants it will look for it anyway.
+ */
 export default function Home() {
   return (
-    <main>
-      <h1>KYC Onboarding &amp; Compliance Review Desk</h1>
-      <p className="sub">
-        Identity verification and the back-office desk where a compliance
-        officer handles what cannot be decided automatically.
+    <main className="landing">
+      <p className="landing-eyebrow">KYC Compliance Desk</p>
+
+      <h1 className="landing-headline">
+        KYC reviews, without the operational chaos.
+      </h1>
+
+      <p className="landing-sub">
+        Identity verification, risk-based review queues, and decisions you can
+        still explain months later — with the evidence attached to each one.
       </p>
 
-      {/* The one line that says why any of this is worth clicking. A visitor
-          who leaves after reading only this should still know what the demo is
-          arguing — which is not "here is a KYC flow" but "here is how a
-          regulated system stays correct when the things it depends on are
-          unreliable". */}
-      <p className="lede">
-        Vendors drop webhooks, deliver them twice and deliver them out of
-        order. This shows what it takes to stay correct anyway — an append-only
-        audit log the database physically refuses to rewrite, a Postgres job
-        queue that cannot hand the same work to two workers, and a risk score
-        that can always say why.
-      </p>
-
-      <div className="home-links">
-        <Link className="home-link" href="/desk">
-          <strong>Compliance review desk →</strong>
-          <span>
-            The most important screen here. The queue of cases automation
-            referred to a human, and the evidence needed to decide them.{" "}
-            <strong>Open with a demo account — one click, no sign-up.</strong>
-          </span>
+      <div className="landing-cta">
+        <Link className="button button-primary" href="/desk">
+          Explore the live demo
         </Link>
-        <Link className="home-link" href="/apply">
-          <strong>Open an account →</strong>
-          <span>
-            The applicant&apos;s journey: details, identity verification,
-            waiting for a decision.
-          </span>
-        </Link>
-        <Link className="home-link" href="/stats">
-          <strong>Stats →</strong>
-          <span>
-            Throughput, how much is decided without a human, and how long a
-            decision takes. Every figure computed from the database, with its
-            method stated.
-          </span>
-        </Link>
+        <p className="landing-note">
+          Synthetic applicants only. No sign-up — the demo account signs in with
+          one click.
+        </p>
       </div>
 
-      <h2>The code</h2>
-      <div className="home-links">
-        <a className="home-link" href={REPO}>
-          <strong>Source on GitHub →</strong>
-          <span>
-            Two services and one database. Raw SQL in both, no ORM, because the
-            schema is shared by TypeScript and Python and must not be owned by
-            either one&apos;s idea of a model.
-          </span>
-        </a>
-        <a className="home-link" href={`${REPO}#readme`}>
-          <strong>README →</strong>
-          <span>
-            What this is, how it is put together, and the async and idempotency
-            problem it exists to answer — with the limitations stated rather
-            than skipped.
-          </span>
-        </a>
-      </div>
+      {/* The argument, for anyone still reading. Kept to one paragraph and
+          placed AFTER the call to action: it is the reason the project is
+          interesting, but it is not what gets someone into the product. */}
+      <section className="landing-detail">
+        <h2>What it is built to survive</h2>
+        <p>
+          Identity providers drop webhooks, deliver them twice, and deliver them
+          out of order. This stays correct anyway: an append-only audit trail
+          the database physically refuses to rewrite, a Postgres job queue that
+          cannot hand the same work to two workers, and a risk score that can
+          always say which signals produced it and under which version of the
+          rules.
+        </p>
 
-      <p className="hint">
-        Synthetic applicants throughout. Nothing here has processed a real
-        person&apos;s data. Service status is on{" "}
-        <Link href="/health">the health page</Link>.
-      </p>
+        <div className="landing-links">
+          <Link href="/apply">Applicant journey</Link>
+          <Link href="/stats">Analytics</Link>
+          <a href={REPO}>Source on GitHub</a>
+          <Link href="/health">Service health</Link>
+        </div>
+      </section>
     </main>
   );
 }

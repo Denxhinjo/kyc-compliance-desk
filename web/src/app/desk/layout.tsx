@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { endSession, requireStaff } from "@/lib/session";
+import { DeskNav } from "./desk-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -32,17 +33,11 @@ export default async function DeskLayout({
   return (
     <div className="desk">
       <header className="desk-bar">
-        <Link href="/desk" className="desk-brand">
-          Review desk
+        <Link href="/" className="desk-brand">
+          KYC Compliance Desk
         </Link>
-        <span className="desk-sep">/</span>
-        <span className="desk-demo">demo — synthetic applicants</span>
+        <DeskNav />
         <span className="desk-spacer" />
-        {/* A page nobody can reach is a page that does not exist. One link,
-            in the shell that already wraps every desk page. */}
-        <Link href="/desk/rulesets" className="desk-user">
-          Rules versions
-        </Link>
         <span className="desk-user">{session.email}</span>
         <form action={signOut}>
           <button type="submit" className="linkish">

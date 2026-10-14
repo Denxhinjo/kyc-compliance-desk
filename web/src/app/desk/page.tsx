@@ -82,6 +82,23 @@ async function recentlyDecided(): Promise<
   return rows;
 }
 
+/**
+ * How many cases a person has decided. One of the three summary figures.
+ *
+ * Counted from `decisions` rather than kept as a running total anywhere:
+ * `decided_by <> 'system'` is exactly the definition the stats page uses for
+ * "human decided", so the two screens cannot drift apart and report different
+ * numbers for the same word.
+ */
+async function reviewedByAPerson(): Promise<number> {
+  const { rows } = await pool.query<{ n: number }>(
+    `select count(*)::int as n from decisions
+      where outcome in ('approved', 'rejected')
+        and decided_by <> 'system'`,
+  );
+  return rows[0]?.n ?? 0;
+}
+
 /** The single most important thing about a case, in the queue's one line. */
 function topReason(row: Row): string {
   const signals = row.risk_signals?.signals ?? [];
@@ -93,7 +110,11 @@ function topReason(row: Row): string {
 
 export default async function QueuePage() {
   await requireStaff();
-  const [pending, decided] = await Promise.all([pendingCases(), recentlyDecided()]);
+  const [pending, decided, reviewed] = await Promise.all([
+    pendingCases(),
+    recentlyDecided(),
+    reviewedByAPerson(),
+  ]);
 
   const rows: QueueRow[] = pending.map((row) => ({
     id: row.id,
@@ -107,19 +128,47 @@ export default async function QueuePage() {
 
   const oldest = rows[0]?.waitingSeconds ?? 0;
 
+  /*
+   * HIGHER RISK, counted from the rows already fetched rather than by a second
+   * query, and labelled with its own threshold rather than as "high risk".
+   *
+   * Every case in this queue scores 20-79 by construction -- that band IS the
+   * referral rule -- so "high risk" would be a word invented on top of the
+   * ruleset rather than read out of it. 60 is the top third of the referral
+   * band, and the label on the tile says so, because a figure whose definition
+   * is not on screen is a figure a reviewer has to guess at.
+   */
+  const HIGHER_RISK_AT = 60;
+  const higherRisk = rows.filter((row) => row.score >= HIGHER_RISK_AT).length;
+
   return (
     <main className="desk-main">
       <div className="desk-head">
-        <h1>Pending review</h1>
-        <div className="desk-stats">
-          <span>
-            <strong>{rows.length}</strong> waiting
+        <h1>Review queue</h1>
+      </div>
+
+      {/* Three figures, deliberately small. The queue is the screen; these are
+          context for it, so they are a single quiet strip rather than a row of
+          cards. Each is computed on this request from the same tables the
+          table below reads -- none is cached, estimated or hardcoded. */}
+      <div className="metric-strip">
+        <div className="metric">
+          <span className="metric-value">{rows.length}</span>
+          <span className="metric-label">Pending review</span>
+        </div>
+        <div className="metric">
+          <span className="metric-value">{higherRisk}</span>
+          <span className="metric-label">Scoring {HIGHER_RISK_AT}+</span>
+        </div>
+        <div className="metric">
+          <span className="metric-value">
+            {rows.length > 0 ? formatWait(oldest) : "—"}
           </span>
-          {rows.length > 0 && (
-            <span>
-              oldest <strong>{formatWait(oldest)}</strong>
-            </span>
-          )}
+          <span className="metric-label">Oldest waiting</span>
+        </div>
+        <div className="metric">
+          <span className="metric-value">{reviewed.toLocaleString()}</span>
+          <span className="metric-label">Reviewed by a person</span>
         </div>
       </div>
 
@@ -144,9 +193,19 @@ export default async function QueuePage() {
         <QueueTable rows={rows} />
       )}
 
+      {/* DEMOTED, not removed.
+          Fifteen decided cases below fourteen pending ones made the screen
+          read as two equal tables, and the one that matters is the queue. It
+          is still one click away, still links to every case, and still shows
+          who decided what -- which is the part worth keeping, because
+          "decided by" is how a visitor sees that the synthetic reviewer and a
+          real officer are distinguishable in the record. */}
       {decided.length > 0 && (
-        <>
-          <h2>Recently decided</h2>
+        <details className="disclosure decided-disclosure">
+          <summary>
+            Recently decided
+            <span className="disclosure-count">{decided.length}</span>
+          </summary>
           <div className="table-scroll">
           <table className="grid muted-grid">
             <thead>
@@ -173,7 +232,7 @@ export default async function QueuePage() {
             </tbody>
           </table>
           </div>
-        </>
+        </details>
       )}
     </main>
   );

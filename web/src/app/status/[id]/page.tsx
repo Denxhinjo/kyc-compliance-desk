@@ -71,9 +71,42 @@ const STATUS_COPY: Record<string, { label: string; detail: string }> = {
     label: "Complete",
     detail: "A decision has been made on your application.",
   },
+
+  /*
+   * THE TWO OFF-RAMPS, in the applicant's language.
+   *
+   * Without these the fallback below printed the raw status — an applicant
+   * whose case closed was shown the string "verification_unavailable", which
+   * is a database value, not a sentence, and tells them nothing about what to
+   * do next.
+   *
+   * NEITHER IS WORDED AS A REFUSAL, because neither is one. No risk finding was
+   * made about this person: in one case the evidence could not be obtained, in
+   * the other it was never supplied. Telling somebody they were declined when
+   * they were not is worse than telling them nothing, and on a real system it
+   * is a decision nobody made appearing in their file.
+   */
+  verification_unavailable: {
+    label: "Could not be completed",
+    detail:
+      "We could not confirm your identity session with our verification " +
+      "provider, so this application has been closed. This is not a refusal " +
+      "and no decision was made about you — you are welcome to apply again.",
+  },
+  expired: {
+    label: "Closed — not started in time",
+    detail:
+      "This application was closed because identity verification was never " +
+      "started. This is not a refusal and no decision was made about you — " +
+      "you are welcome to apply again.",
+  },
 };
 
+/** The happy path, and the only thing the progress tracker walks. */
 const LIFECYCLE = ["started", "submitted", "checking", "screening", "decided"];
+
+/** Terminal states that leave the journey rather than completing it. */
+const OFF_RAMPS = ["verification_unavailable", "expired"];
 
 export default async function StatusPage({
   params,
@@ -145,18 +178,35 @@ export default async function StatusPage({
         <p className="status-label">{copy.label}</p>
         <p className="status-detail">{copy.detail}</p>
 
-        <ol className="stages">
-          {LIFECYCLE.map((stage, i) => (
-            <li
-              key={stage}
-              className={
-                i < stageIndex ? "stage done" : i === stageIndex ? "stage now" : "stage"
-              }
-            >
-              {STATUS_COPY[stage].label}
-            </li>
-          ))}
-        </ol>
+        {/* The tracker walks the happy path only. An application that took an
+            off-ramp did not reach the end of it, and drawing it as though it
+            had — or, as it did before these states existed, drawing it with no
+            stage reached at all — misrepresents what happened. */}
+        {!OFF_RAMPS.includes(application.status) && (
+          <ol className="stages">
+            {LIFECYCLE.map((stage, i) => (
+              <li
+                key={stage}
+                className={
+                  i < stageIndex
+                    ? "stage done"
+                    : i === stageIndex
+                      ? "stage now"
+                      : "stage"
+                }
+              >
+                {STATUS_COPY[stage].label}
+              </li>
+            ))}
+          </ol>
+        )}
+
+        {OFF_RAMPS.includes(application.status) && (
+          <p className="hint">
+            Starting again creates a new application. Your previous one stays on
+            our record exactly as it is.
+          </p>
+        )}
 
         {application.status === "started" && (
           <p>
