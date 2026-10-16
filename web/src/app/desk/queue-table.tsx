@@ -144,7 +144,12 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
       </div>
       {/* Scrollable rather than squeezed. A dense operations table has a width
           below which it stops being readable; letting it scroll sideways keeps
-          every column intact instead of crushing all of them. */}
+          every column intact instead of crushing all of them.
+
+          Wrapped in a .surface so the queue reads as one object on the page
+          rather than rows floating on the background — the same treatment the
+          metric strip and every panel get. */}
+      <div className="surface">
       <div className="table-scroll">
       <table className="grid queue">
         <thead>
@@ -215,6 +220,7 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
           </button>
         </p>
       )}
+      </div>
       </div>
       <p className="keys">
         <kbd>j</kbd> <kbd>k</kbd> move · <kbd>↵</kbd> open case

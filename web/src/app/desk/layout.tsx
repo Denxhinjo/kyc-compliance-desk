@@ -1,7 +1,6 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { endSession, requireStaff } from "@/lib/session";
-import { DeskNav } from "./desk-nav";
+import { STAFF_NAV, TopBar } from "@/components/TopBar";
 
 export const dynamic = "force-dynamic";
 
@@ -32,19 +31,19 @@ export default async function DeskLayout({
 
   return (
     <div className="desk">
-      <header className="desk-bar">
-        <Link href="/" className="desk-brand">
-          KYC Compliance Desk
-        </Link>
-        <DeskNav />
-        <span className="desk-spacer" />
-        <span className="desk-user">{session.email}</span>
-        <form action={signOut}>
-          <button type="submit" className="linkish">
-            Sign out
-          </button>
-        </form>
-      </header>
+      <TopBar
+        items={STAFF_NAV}
+        right={
+          <>
+            <span className="desk-user">{session.email}</span>
+            <form action={signOut}>
+              <button type="submit" className="linkish">
+                Sign out
+              </button>
+            </form>
+          </>
+        }
+      />
       {children}
     </div>
   );
