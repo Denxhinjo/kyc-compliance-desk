@@ -85,10 +85,20 @@ jobs:
         with:
           python-version: "3.12"
 
-      # No dependency install. trickle.py imports seed.py for its synthetic
-      # name sources and otherwise uses only the standard library — no psycopg,
-      # because it holds no database credential and writes nothing directly.
-      # Everything it creates goes through the deployed app's own endpoints.
+      # trickle.py itself is standard-library only, but it imports seed.py for
+      # the synthetic name sources and seed.py imports psycopg at module scope.
+      # So the driver has to be installed even though this job never opens a
+      # database connection: it holds no DATABASE_URL and writes nothing
+      # directly, and everything it creates goes through the deployed app's own
+      # endpoints.
+      #
+      # This was missed first time round. The workflow asserted no install was
+      # needed, which was true of trickle.py and false of its import graph, and
+      # the tests did not catch it because the local virtualenv has psycopg
+      # already. The first real run failed on ModuleNotFoundError.
+      - name: Install the worker's dependencies
+        run: pip install -r worker/requirements.txt
+
       - name: Create applicants through the real pipeline
         working-directory: worker
         env:

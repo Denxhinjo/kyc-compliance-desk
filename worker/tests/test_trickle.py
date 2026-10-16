@@ -371,6 +371,32 @@ def test_the_workflow_runs_hourly_and_offset_from_the_drain():
     assert mine != theirs
 
 
+def test_the_workflow_installs_what_trickle_actually_imports():
+    """trickle.py is stdlib-only; its IMPORT GRAPH is not.
+
+    It imports seed.py for the synthetic name sources, and seed.py imports
+    psycopg at module scope. The workflow originally asserted that no
+    dependency install was needed -- true of trickle.py, false of what it
+    pulls in -- and the first real run died on ModuleNotFoundError.
+
+    The local tests did not catch it because this virtualenv has psycopg
+    installed, so the import succeeded here and nowhere else. This asserts the
+    property that actually matters: whatever trickle.py reaches must be
+    installed by the job that runs it.
+    """
+    source = (REPO_ROOT / "worker" / "trickle.py").read_text(encoding="utf-8")
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    # If it imports from the worker package at all, it inherits that package's
+    # dependencies and the workflow has to install them.
+    imports_worker_code = "from seed import" in source or "import seed" in source
+    if imports_worker_code:
+        assert "pip install -r worker/requirements.txt" in workflow, (
+            "trickle.py imports seed.py, which imports psycopg at module "
+            "scope, so the workflow must install worker/requirements.txt"
+        )
+
+
 def test_the_workflow_fails_closed_on_missing_configuration():
     """No invented defaults. Unset means a red run, not a guess at a url."""
     trickle_yml = WORKFLOW.read_text(encoding="utf-8")
