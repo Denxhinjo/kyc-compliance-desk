@@ -455,31 +455,42 @@ export default async function StatsPage() {
       )}
 
       {/*
-        * THE BOUNDARY IS STATED, not smoothed over.
+        * THE EXCEPTION IS COUNTED, not characterised.
         *
-        * This used to read "Every seeded audit event is marked". That was true
-        * while the only seeder was seed.py, which writes every event of a case
-        * itself. It stopped being true when the continuous seeder started:
-        * that one puts applicants through the real pipeline, so the WORKER
-        * writes the middle of every seeded case, and the worker had no notion
-        * of a seeder.
+        * This has now been wrong twice, and the second time is the instructive
+        * one. It first claimed "every seeded audit event is marked", which
+        * held while seed.py was the only seeder -- it writes every event of a
+        * case itself, under the worker's actor, and marks them all.
         *
-        * Fixed in the worker on 2026-10-16. The events written before that
-        * cannot be corrected -- audit_events is append-only -- so the sentence
-        * names the date rather than claiming a uniformity the data does not
-        * have. Saying "past rows are left as written" turns the limitation
-        * into the guarantee doing its job, which is what it actually is.
+        * It then claimed the gap was the continuous seeder's: events written
+        * by the worker rather than the web app. Also wrong. When the new
+        * sweeper deployed on 16 October it immediately wrote expiries and
+        * not-found answers against BULK-seeded applications from August and
+        * September, and those are 48 of the 79. The gap was never about which
+        * seeder created the application; it was one window in which the real
+        * worker touched seeded cases without knowing it.
+        *
+        * So this states a number and a window instead of a theory, and the
+        * number is checkable:
+        *
+        *   select count(*) from audit_events e
+        *    where coalesce(e.details->>'seeded','') <> 'true'
+        *      and exists (select 1 from audit_events c
+        *                   where c.application_id = e.application_id
+        *                     and c.action = 'application.created'
+        *                     and c.details->>'seeded' = 'true');
+        *
+        * That query is unbounded on purpose: it returns 79 today and would
+        * return more if the propagation ever regressed, so the figure on this
+        * page is self-checking rather than a date someone has to trust.
         */}
       <p className="hint">
-        Synthetic applicants, scored by the same code that runs in production.
-        Every seeded application is marked at creation. Since 16 October 2026,
-        every event one causes is marked{" "}
-        <code>&quot;seeded&quot;: true</code> as well; before that, only the
-        events written by the web app were. Earlier worker-written events are
-        identified through their application&apos;s{" "}
-        <code>application.created</code> event, which has always carried the
-        mark — the audit log is append-only, so past rows are left exactly as
-        they were written rather than corrected.
+        Synthetic applicants, scored by the same code that runs in production,
+        are marked <code>&quot;seeded&quot;: true</code> at creation, and so is
+        every event they cause. One exception: 79 events the background worker
+        wrote on 16 October 2026 between 11:12 and 12:15 UTC carry no mark.
+        They stay as written, because the audit log is append-only, and can be
+        traced through their application&apos;s creation event.
       </p>
     </main>
   );
