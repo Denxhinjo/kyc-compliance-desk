@@ -169,6 +169,32 @@ async function latency(): Promise<Latency> {
   return rows[0];
 }
 
+/**
+ * Events recorded for a seeded application that carry no `"seeded": true`.
+ *
+ * COMPUTED ON EVERY REQUEST, not hard-coded. The footer used to state a
+ * literal 79, which was true on the afternoon it was written and would have
+ * started lying the first time anyone decided a seeded case at the desk. A
+ * figure about the data's own integrity is the last one that should be a
+ * constant in the source.
+ *
+ * Deliberately unbounded in time and not filtered by actor: it is exactly the
+ * complement of what the footer claims, so if the claim ever stops holding the
+ * number moves on its own.
+ */
+async function unmarkedSeededEvents(): Promise<number> {
+  const { rows } = await pool.query<{ n: number }>(
+    `select count(*)::int as n
+       from audit_events e
+      where coalesce(e.details->>'seeded', '') <> 'true'
+        and exists (select 1 from audit_events c
+                     where c.application_id = e.application_id
+                       and c.action = 'application.created'
+                       and c.details->>'seeded' = 'true')`,
+  );
+  return rows[0]?.n ?? 0;
+}
+
 async function queueState(): Promise<QueueState> {
   const { rows } = await pool.query<QueueState>(
     `select count(*)::int as pending,
@@ -208,11 +234,12 @@ async function decisionsByDay(): Promise<DayRow[]> {
 }
 
 export default async function StatsPage() {
-  const [total, lat, queue, byDay] = await Promise.all([
+  const [total, lat, queue, byDay, unmarked] = await Promise.all([
     totals(),
     latency(),
     queueState(),
     decisionsByDay(),
+    unmarkedSeededEvents(),
   ]);
 
   const enoughData = total.decided >= MIN_N_FOR_STATS;
@@ -455,42 +482,43 @@ export default async function StatsPage() {
       )}
 
       {/*
-        * THE EXCEPTION IS COUNTED, not characterised.
+        * THE NUMBER IS QUERIED, NOT WRITTEN DOWN.
         *
-        * This has now been wrong twice, and the second time is the instructive
-        * one. It first claimed "every seeded audit event is marked", which
-        * held while seed.py was the only seeder -- it writes every event of a
-        * case itself, under the worker's actor, and marks them all.
+        * This footer has been wrong twice, and both times for the same reason:
+        * it asserted something about the data from inside the source, where it
+        * could not notice the data changing underneath it.
         *
-        * It then claimed the gap was the continuous seeder's: events written
-        * by the worker rather than the web app. Also wrong. When the new
-        * sweeper deployed on 16 October it immediately wrote expiries and
-        * not-found answers against BULK-seeded applications from August and
-        * September, and those are 48 of the 79. The gap was never about which
-        * seeder created the application; it was one window in which the real
-        * worker touched seeded cases without knowing it.
+        *   1. "Every seeded audit event is marked" -- true while seed.py was
+        *      the only seeder, false once the worker started writing events on
+        *      seeded applications.
+        *   2. A hard-coded count of 79 -- true for one afternoon. The desk did
+        *      not mark a visitor's decision on a seeded case, so the first
+        *      visitor to approve one would have made it 80 with nothing on the
+        *      page moving.
         *
-        * So this states a number and a window instead of a theory, and the
-        * number is checkable:
-        *
-        *   select count(*) from audit_events e
-        *    where coalesce(e.details->>'seeded','') <> 'true'
-        *      and exists (select 1 from audit_events c
-        *                   where c.application_id = e.application_id
-        *                     and c.action = 'application.created'
-        *                     and c.details->>'seeded' = 'true');
-        *
-        * That query is unbounded on purpose: it returns 79 today and would
-        * return more if the propagation ever regressed, so the figure on this
-        * page is self-checking rather than a date someone has to trust.
+        * Both write paths now read the mark from the application's creation
+        * event rather than being told it (lib/seeded.ts, worker/audit.py), and
+        * the exception below is counted on every request. If the invariant
+        * ever breaks again, this sentence reports it instead of contradicting
+        * it.
         */}
       <p className="hint">
-        Synthetic applicants, scored by the same code that runs in production,
-        are marked <code>&quot;seeded&quot;: true</code> at creation, and so is
-        every event they cause. One exception: 79 events the background worker
-        wrote on 16 October 2026 between 11:12 and 12:15 UTC carry no mark.
-        They stay as written, because the audit log is append-only, and can be
-        traced through their application&apos;s creation event.
+        Synthetic applicants, scored by the same code that runs in production.
+        Every event recorded for a seeded application is marked{" "}
+        <code>&quot;seeded&quot;: true</code> — whoever acted, which is recorded
+        separately in the event&apos;s actor.
+        {unmarked > 0 ? (
+          <>
+            {" "}
+            {unmarked.toLocaleString()}{" "}
+            {unmarked === 1 ? "event was" : "events were"} recorded before the
+            marking was complete and carry no mark. They stay as written,
+            because the audit log is append-only, and can be traced through
+            their application&apos;s <code>application.created</code> event.
+          </>
+        ) : (
+          <> No event is currently missing the mark.</>
+        )}
       </p>
     </main>
   );

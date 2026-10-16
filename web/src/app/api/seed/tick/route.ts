@@ -164,9 +164,7 @@ export async function POST(request: Request): Promise<Response> {
     );
 
     try {
-      const session = await startVerificationSession(applicationId, {
-        seeded: true,
-      });
+      const session = await startVerificationSession(applicationId);
 
       // The vendor reaches a verdict and tells us, through the real signed
       // webhook. Nothing here decides anything: the webhook enqueues
@@ -191,7 +189,11 @@ export async function POST(request: Request): Promise<Response> {
       actor: "system:seed",
       action: "trickle.completed",
       details: {
-        seeded: true,
+        // No `seeded` here. The mark means "this event belongs to a seeded
+        // APPLICATION", and this event belongs to none — applicationId is
+        // null, because it is about a run. The action name already says it was
+        // a seeding run, and the count query ignores null-application rows, so
+        // carrying the flag here would only blur the definition.
         created: created.length,
         reviewed: reviewed.decided,
         review_skipped: reviewed.skipped,
@@ -292,7 +294,8 @@ async function runSyntheticReviewer(
       outcome,
       reason,
       actor: SYNTHETIC_REVIEWER,
-      seeded: true,
+      // No `seeded` here any more: recordDecision reads it from the
+      // application's creation event, so the desk and the bot cannot diverge.
     });
 
     if (result.ok) {

@@ -1,5 +1,6 @@
 import { withTransaction } from "@/lib/db";
 import { logEvent, type Actor } from "@/lib/audit";
+import { seededMarker } from "@/lib/seeded";
 
 /**
  * Recording a decision, in one place.
@@ -45,9 +46,21 @@ export interface RecordDecisionRequest {
    * which is also what keeps it out of the automatic figures.
    */
   actor: Actor;
-  /** Adds `"seeded": true` to the audit details, as the bulk seeder does. */
-  seeded?: boolean;
 }
+
+/*
+ * NOTE ON `"seeded"`: it is NOT a parameter here, deliberately.
+ *
+ * It used to be, and the desk simply did not pass it — so a visitor approving
+ * a seeded case wrote an unmarked event while the synthetic reviewer, three
+ * lines away in the same file, wrote a marked one. A flag a caller has to
+ * remember is a flag a caller will forget.
+ *
+ * It is now looked up inside the transaction below, from the application's own
+ * creation event, so every write path through this function is marked
+ * correctly without knowing the rule exists. See lib/seeded.ts for what the
+ * mark means: it describes the APPLICATION, not who acted.
+ */
 
 export type RecordDecisionResult =
   | { ok: true }
@@ -66,7 +79,7 @@ export type RecordDecisionResult =
 export async function recordDecision(
   request: RecordDecisionRequest,
 ): Promise<RecordDecisionResult> {
-  const { applicationId, outcome, reason, actor, seeded } = request;
+  const { applicationId, outcome, reason, actor } = request;
 
   try {
     return await withTransaction<RecordDecisionResult>(async (client) => {
@@ -178,7 +191,9 @@ export async function recordDecision(
           reason,
           automatic: false,
           risk_score: scored.rows[0]?.risk_score ?? null,
-          ...(seeded ? { seeded: true } : {}),
+          // Read inside the transaction, from the application's immutable
+          // creation event. Not supplied by the caller — see the note above.
+          ...(await seededMarker(client, applicationId)),
         },
       });
 

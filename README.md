@@ -592,8 +592,49 @@ what makes the queue build overnight and across weekends and drain on the next
 working morning — and what makes median time-to-decision a real number rather
 than a constant.
 
-Every seeded audit event carries `"seeded": true`. That table is the one thing
-meant to be unvarnished truth, and the seeder fabricates six weeks of it.
+### What `"seeded": true` means
+
+Every event recorded for a **seeded application** carries `"seeded": true`.
+That table is the one thing meant to be unvarnished truth, and the seeder
+fabricates six weeks of it, so a reader must be able to tell which rows those
+are.
+
+**The mark describes the application, not who acted.** Those are independent,
+and `actor` is what records the second:
+
+| `actor` | | marked when the application is seeded |
+| --- | --- | --- |
+| `system:worker` | automatic processing | yes |
+| `staff:auto-reviewer@synthetic.invalid` | the synthetic reviewer | yes |
+| `staff:officer@example.com` | a visitor at the demo desk | yes |
+| `system:web` | the web service | yes |
+
+A visitor approving a seeded case is a real decision by a real person about
+synthetic data. The event is marked because the *application* is synthetic;
+`actor` says a person made the call. Conflating the two is what broke this
+twice — once when the worker wrote unmarked events on seeded applications, and
+again when the fix covered the worker and left the desk.
+
+Both write paths now **read** the mark from the application's own
+`application.created` event rather than being told it:
+[`worker/audit.py`](worker/audit.py) `seeded_marker()` and
+[`web/src/lib/seeded.ts`](web/src/lib/seeded.ts) `seededMarker()`. The audit
+log is append-only, so a case cannot be made to look seeded, or made to look
+real, after the fact.
+
+Events written before the marking was complete carry no mark and are left
+exactly as written, because the audit log cannot be corrected. They are
+identified through their application's creation event. The stats page counts
+them on every request rather than stating a number from the source:
+
+```sql
+select count(*) from audit_events e
+ where coalesce(e.details->>'seeded', '') <> 'true'
+   and exists (select 1 from audit_events c
+                where c.application_id = e.application_id
+                  and c.action = 'application.created'
+                  and c.details->>'seeded' = 'true');
+```
 
 ---
 

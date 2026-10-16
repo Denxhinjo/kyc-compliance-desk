@@ -1,6 +1,7 @@
 import { withTransaction } from "@/lib/db";
 import { logEvent } from "@/lib/audit";
 import { createVerificationSession } from "@/lib/didit";
+import { seededMarker } from "@/lib/seeded";
 
 /**
  * Starting a verification session, in one place.
@@ -29,10 +30,12 @@ export interface StartedSession {
   movedToSubmitted: boolean;
 }
 
-export interface StartOptions {
-  /** Adds `"seeded": true` to the audit details, as the bulk seeder does. */
-  seeded?: boolean;
-}
+/*
+ * `seeded` is not an option here either. By the time a verification session is
+ * started the application's creation event exists, so the mark can be read
+ * rather than passed — the same reasoning as recordDecision. See lib/seeded.ts.
+ */
+export type StartOptions = Record<string, never>;
 
 /**
  * Create the session with the vendor, then record it.
@@ -44,7 +47,6 @@ export interface StartOptions {
  */
 export async function startVerificationSession(
   applicationId: string,
-  options: StartOptions = {},
 ): Promise<StartedSession> {
   const session = await createVerificationSession(applicationId);
 
@@ -70,16 +72,20 @@ export async function startVerificationSession(
       );
     }
 
+    const marker = await seededMarker(client, applicationId);
+
     await logEvent(client, {
       applicationId,
-      actor: options.seeded ? "system:seed" : "system:web",
+      // The actor says WHO; the mark says WHAT THE APPLICATION IS. A seeded
+      // application's session is still created by the web service.
+      actor: "system:web",
       action: "verification.session_created",
       details: {
         vendor: "didit",
         session_id: session.sessionId,
         vendor_status: session.status,
         status_to: moved.rowCount === 1 ? "submitted" : null,
-        ...(options.seeded ? { seeded: true } : {}),
+        ...marker,
       },
     });
 

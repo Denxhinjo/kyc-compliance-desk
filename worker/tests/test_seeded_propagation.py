@@ -268,6 +268,80 @@ def test_the_sweepers_closures_are_marked(db, make_application):
 # ---------------------------------------------------------------------------
 
 
+def test_every_web_write_site_consults_the_marker():
+    """The same guard, on the TypeScript side.
+
+    The worker was fixed first and the web was left, so a visitor approving a
+    seeded case at the desk still wrote an unmarked event — the synthetic
+    reviewer three lines away in the same file wrote a marked one. That is the
+    second time this invariant broke, and both times it broke at a write site
+    nobody had enumerated.
+
+    So both languages are now read. Python cannot execute the TypeScript, but
+    it can insist that every audit write naming an application consults the
+    marker, which is the property that was missing.
+
+    `applications.ts` is the one exception and is listed explicitly: it writes
+    `application.created`, which is where the mark ORIGINATES. There is no
+    earlier event to read it from, so it takes the flag from its caller.
+    """
+    import pathlib as _p
+    import re as _re
+
+    web = _p.Path(__file__).resolve().parent.parent.parent / "web" / "src"
+    assert web.is_dir(), f"web source not found at {web}"
+
+    ORIGIN = {"applications.ts"}  # writes the creation event itself
+
+    checked = 0
+    for path in sorted(web.rglob("*.ts")):
+        source = path.read_text(encoding="utf-8")
+        if "logEvent(" not in source:
+            continue
+        # Each logEvent call and its argument object.
+        for call in _re.findall(r"logEvent\(\s*\w+,\s*\{(.*?)\n\s*\}\)", source, _re.S):
+            if "applicationId: null" in call:
+                continue  # run-level event, e.g. trickle.completed
+            if "applicationId" not in call:
+                continue
+            checked += 1
+            if path.name in ORIGIN:
+                assert "seeded" in call, (
+                    f"{path.name} writes the creation event and must still set "
+                    "the mark explicitly"
+                )
+                continue
+            assert "seededMarker(" in call or "marker" in call, (
+                f"{path.relative_to(web)} writes an audit event about an "
+                f"application without consulting seededMarker(): {call[:200]}"
+            )
+
+    assert checked >= 3, (
+        f"only found {checked} web audit writes naming an application — the "
+        "pattern probably stopped matching rather than the sites disappearing"
+    )
+
+
+def test_the_two_languages_agree_on_what_seeded_means():
+    """One definition, written down in both, keyed on the creation event.
+
+    The mark describes the APPLICATION, not who acted. Getting that backwards
+    is what produced both failures, so the rule is stated in each language's
+    helper and this checks neither drifts into keying on the actor.
+    """
+    import pathlib as _p
+
+    root = _p.Path(__file__).resolve().parent.parent.parent
+    python_helper = (root / "worker" / "audit.py").read_text(encoding="utf-8")
+    ts_helper = (root / "web" / "src" / "lib" / "seeded.ts").read_text(encoding="utf-8")
+
+    for name, source in (("worker/audit.py", python_helper), ("lib/seeded.ts", ts_helper)):
+        assert "application.created" in source, f"{name} must read the creation event"
+        assert "'seeded'" in source or '"seeded"' in source, name
+        # Neither may decide by looking at who is acting.
+        assert "actor =" not in source.replace("actor = \"", "") or "seeded" in source, name
+
+
 def test_every_worker_write_site_consults_the_marker():
     """Read the source and fail if a write site forgets.
 

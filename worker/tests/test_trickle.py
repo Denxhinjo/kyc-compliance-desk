@@ -335,13 +335,31 @@ def test_the_route_refuses_without_the_shared_secret():
     )
 
 
-def test_every_seeded_write_is_marked_seeded():
-    """So a visitor can tell demo data from their own, and so the reviewer's
-    own restriction remains enforceable."""
+def test_the_route_marks_only_what_it_originates():
+    """The route sets the mark ONCE, at creation, and nowhere else.
+
+    This replaced an assertion that the route said `seeded: true` three times —
+    once for creation, once for verification, once for the decision. That was
+    true of the first design and was exactly the weakness in it: three callers
+    each had to remember, and the one that mattered most, the review desk, was
+    not in this file at all and did not.
+
+    The mark is now READ from the application's creation event by
+    lib/verification.ts and lib/decisions.ts, so those two sites cannot forget
+    it and neither can any site added later. What remains here is the single
+    origin — `insertApplication`, which writes the creation event itself and has
+    no earlier event to read from.
+
+    test_seeded_propagation.py::test_every_web_write_site_consults_the_marker
+    is what now covers the rest.
+    """
     route = ROUTE.read_text(encoding="utf-8")
-    assert "seeded: true" in route
-    assert route.count("seeded: true") >= 3, (
-        "creation, verification and the decision each have to say so"
+    assert route.count("seeded: true") == 1, (
+        "the route should set the mark exactly once, at creation; the other "
+        f"write paths read it. Found {route.count('seeded: true')}"
+    )
+    assert "insertApplication(client, checked.value, { seeded: true })" in route, (
+        "the one occurrence should be the creation call"
     )
 
 
