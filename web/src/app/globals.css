@@ -137,6 +137,14 @@ a:hover {
 /* Panels hold forms and summaries — things read one line at a time — so they
    are capped at the form measure even when the page around them is wider. */
 .panel {
+  /* Upgraded in place rather than replaced. Twelve pages already use this
+     class; restyling it here is how they all adopt the card treatment without
+     a line of their markup changing, which is the whole point of having a
+     shared system rather than per-page styles. */
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-raised);
   max-width: var(--width-form);
   padding: var(--space-4) var(--space-5);
 }
@@ -257,7 +265,7 @@ textarea::placeholder {
 }
 
 input[aria-invalid="true"] {
-  border-color: var(--bad-border);
+  border-color: var(--bad-border-strong);
 }
 
 textarea {
@@ -361,7 +369,7 @@ label {
    the only irreversible actions in the interface. */
 .btn.approve {
   background: var(--ok-bg);
-  border-color: var(--ok-border);
+  border-color: var(--ok-border-strong);
   color: var(--ok-text);
 }
 .btn.approve:hover:not(:disabled) {
@@ -370,7 +378,7 @@ label {
 }
 .btn.reject {
   background: var(--bad-bg);
-  border-color: var(--bad-border);
+  border-color: var(--bad-border-strong);
   color: var(--bad-text);
 }
 .btn.reject:hover:not(:disabled) {
@@ -445,8 +453,12 @@ kbd {
    product; this is a case file. ------------------------------------------- */
 
 .pill {
+  /* The one fully-rounded radius in the system. See the note on --radius-pill:
+     a rounded chip is how the eye separates a status from the text beside it
+     without needing a second colour or a rule. Changed here so all eight
+     existing usages adopt it at once. */
   background: var(--neutral-bg);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   color: var(--neutral-text);
   display: inline-block;
   font-size: var(--text-xs);
@@ -736,36 +748,6 @@ pre {
    4. The desk — queue and case view
    =========================================================================== */
 
-.desk-bar {
-  align-items: center;
-  background: var(--surface);
-  border-bottom: var(--border-width) solid var(--border);
-  display: flex;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-.desk-brand {
-  color: var(--text);
-  font-weight: var(--weight-bold);
-}
-.desk-brand:hover {
-  text-decoration: none;
-}
-.desk-sep {
-  color: var(--border);
-}
-.desk-demo {
-  color: var(--warn-text);
-  font-size: var(--text-xs);
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
-}
-.desk-spacer {
-  flex: 1;
-}
 .desk-user {
   color: var(--text-muted);
   font-family: var(--font-mono);
@@ -986,6 +968,11 @@ pre {
   grid-column: 1 / 3;
 }
 .decide-block {
+  /* Spans both rows so the decision sits beside the evidence rather than
+     under it. align-self keeps it at the top and lets it hug its content:
+     stretched, an already-decided case leaves a tall empty card, because a
+     closed decision is three lines where the form was. */
+  align-self: start;
   grid-column: 3;
   grid-row: 1 / 3;
 }
@@ -1242,32 +1229,17 @@ pre {
   color: var(--bad-text);
 }
 
-.stages {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  list-style: none;
-  margin: 0 0 var(--space-4);
-  padding: 0;
-}
-.stage {
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-dim);
-  font-size: var(--text-xs);
-  letter-spacing: var(--tracking-label);
-  padding: var(--space-1) var(--space-3);
-  text-transform: uppercase;
-}
-.stage.done {
-  border-color: var(--ok-border);
+/* The applicant's five-stage tracker used to be `.stages`/`.stage` — a second
+   stepper vocabulary, drawn as outlined boxes, for the same idea `.journey`
+   already expressed on /apply with numbered circles. Two vocabularies for one
+   concept is how a stylesheet drifts, so the status page now emits `.journey`
+   and only the state `.journey` lacked is defined here. */
+.journey-step.done {
   color: var(--ok-text);
 }
-.stage.now {
-  background: var(--accent-bg);
-  border-color: var(--accent);
-  color: var(--text);
-  font-weight: var(--weight-bold);
+.journey-step.done .journey-num {
+  background: var(--ok-bg);
+  color: var(--ok-text);
 }
 
 .summary {
@@ -1429,13 +1401,14 @@ pre {
     padding-right: var(--space-3);
   }
 
-  /* The demo marker must survive every breakpoint. */
-  .desk-bar {
+  /* The bar wraps rather than scrolling its whole self away. */
+  .topbar-inner {
     flex-wrap: wrap;
-    gap: var(--space-1) var(--space-2);
+    gap: var(--space-1) var(--space-3);
+    padding-block: var(--space-2);
   }
-  .desk-spacer {
-    display: none;
+  .topbar-right {
+    margin-left: 0;
   }
   .desk-head {
     flex-direction: column;
@@ -1528,9 +1501,9 @@ pre {
     padding: var(--space-3) 0;
   }
 
-  /* The desk bar's two controls. Padding rather than min-height, so the bar
-     keeps wrapping the way it already does at this width. */
-  .desk-brand,
+  /* The bar's controls. Padding rather than min-height, so the bar keeps
+     wrapping the way it already does at this width. */
+  .brand,
   .linkish {
     display: inline-block;
     padding-block: var(--space-2);
@@ -1612,22 +1585,29 @@ pre {
   padding: 1px 0;
 }
 
-/* --- Landing --------------------------------------------------------------
+/* --- Landing ---------------------------------------------------------------
 
-   The front door, and the only screen in the app that is allowed a filled
-   button. Everything here is in service of one decision: open the desk.
-
-   Centred rather than left-aligned, which is a departure from every other
-   screen. The rest of the app is a dense operations tool and left alignment is
-   what makes a column of data scannable; this page has no data, one action,
-   and about forty words, and left-aligning that against a 1200px viewport
-   leaves it stranded in the corner. ---------------------------------------- */
+   Two columns at desktop: the argument on the left, the live queue on the
+   right. Left-aligned, unlike the previous centred version — a centred column
+   is right for forty words and one button, and wrong the moment there is a
+   table beside it to line up against. ---------------------------------------- */
 
 .landing {
   margin: 0 auto;
-  max-width: var(--width-prose);
+  max-width: var(--width-wide);
   padding: var(--space-6) var(--space-4);
-  text-align: center;
+}
+
+.hero {
+  align-items: center;
+  display: grid;
+  gap: var(--space-6);
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  padding: var(--space-5) 0 var(--space-6);
+}
+
+.hero-text {
+  min-width: 0;
 }
 
 .landing-eyebrow {
@@ -1635,39 +1615,37 @@ pre {
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
   letter-spacing: var(--tracking-label);
-  margin: 0 0 var(--space-4);
+  margin: 0 0 var(--space-3);
   text-transform: uppercase;
 }
 
-/* The one place a size outside the four-step scale is justified, and it is
-   worth being explicit about why rather than quietly adding a fifth token.
-   --text-xl is 28px and sized for STAT VALUES in a dense grid; a headline is
-   the only element on its own screen. clamp() so it is not 36px on a phone. */
+/* The one size outside the four-step scale, and worth being explicit about
+   rather than quietly adding a fifth token: --text-xl is 28px and sized for
+   stat values in a dense grid, where a headline is the only element on its
+   own screen. clamp() so it is not 40px on a phone. */
 .landing-headline {
-  font-size: clamp(1.75rem, 1.2rem + 2.4vw, 2.5rem);
+  font-size: clamp(1.875rem, 1.1rem + 2.6vw, 2.75rem);
   font-weight: var(--weight-bold);
-  letter-spacing: -0.015em;
-  line-height: var(--leading-tight);
-  margin: 0 auto var(--space-4);
-  max-width: 18ch;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+  margin: 0 0 var(--space-4);
+  max-width: 16ch;
 }
 
 .landing-sub {
   color: var(--text-muted);
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
-  margin: 0 auto var(--space-6);
-  max-width: 56ch;
+  margin: 0 0 var(--space-5);
+  max-width: 52ch;
 }
 
 .landing-cta {
-  margin-bottom: var(--space-6);
+  margin-bottom: 0;
 }
 
-/* THE primary action. Filled accent, and there is exactly one of these in the
-   whole application — see the note on --accent in tokens.css. Bigger than a
-   standard button because it is the only thing on the screen to press, not
-   because bigger is better. */
+/* THE primary action. Filled accent, and there is exactly one in the whole
+   application — see the note on --accent in tokens.css. */
 .button-primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -1686,30 +1664,175 @@ pre {
   color: var(--text-dim);
   font-size: var(--text-xs);
   margin: var(--space-3) 0 0;
+  max-width: 44ch;
 }
 
-.landing-detail {
-  border-top: var(--border-width) solid var(--border);
-  margin-top: var(--space-6);
-  padding-top: var(--space-5);
+/* --- Hero visual: the live queue ------------------------------------------- */
+
+.hero-visual {
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.hero-visual-bar {
+  align-items: center;
+  background: var(--surface-raised);
+  border-bottom: var(--border-width) solid var(--border);
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+.hero-visual-dot {
+  background: var(--ok-text);
+  border-radius: 50%;
+  height: 0.5rem;
+  width: 0.5rem;
+}
+.hero-visual-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+.hero-visual-live {
+  background: var(--ok-bg);
+  border-radius: var(--radius-pill);
+  color: var(--ok-text);
+  font-size: var(--text-xs);
+  margin-left: auto;
+  padding: 1px var(--space-2);
+}
+
+.hero-table {
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  table-layout: fixed;
+  width: 100%;
+}
+.hero-table th {
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-label);
+  padding: var(--space-2) var(--space-3);
   text-align: left;
+  text-transform: uppercase;
 }
-.landing-detail h2 {
-  margin-top: 0;
+.hero-table td {
+  border-top: var(--border-width) solid var(--border);
+  padding: var(--space-2) var(--space-3);
+  vertical-align: top;
 }
-.landing-detail p {
+.hero-table th:nth-child(1), .hero-table td:nth-child(1) { width: 4.5rem; }
+.hero-table th:nth-child(2), .hero-table td:nth-child(2) { width: 4rem; }
+.hero-table th:nth-child(3), .hero-table td:nth-child(3) { width: 34%; }
+
+.hero-name {
+  font-weight: var(--weight-medium);
+}
+/* The full reason is KEPT, not replaced by a category — that is the whole
+   argument. It is clamped to two lines so four rows stay the same height,
+   with the rest on hover and in full on the case page.
+
+   The clamp is on an inner span because `display: -webkit-box` on a table
+   cell is ignored by the table layout and the third line bleeds through. */
+.hero-reason {
+  color: var(--text-muted);
+}
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.hero-visual-empty,
+.hero-visual-foot {
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  margin: 0;
+  padding: var(--space-3);
+}
+.hero-visual-foot {
+  border-top: var(--border-width) solid var(--border);
+}
+
+/* --- Feature row ----------------------------------------------------------- */
+
+.features {
+  border-top: var(--border-width) solid var(--border);
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding-top: var(--space-6);
+}
+
+/* Overrides the global h2, which is an uppercase micro-label for section
+   headings inside a dense page. These are card titles on a marketing screen
+   and want sentence case at reading size. */
+.feature h2 {
+  color: var(--text);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  letter-spacing: normal;
+  margin: var(--space-3) 0 var(--space-2);
+  text-transform: none;
+}
+.feature p {
   color: var(--text-muted);
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
-  margin: 0 0 var(--space-4);
-  max-width: 68ch;
+  margin: 0;
 }
 
-.landing-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-  font-size: var(--text-sm);
+.feature-icon {
+  align-items: center;
+  border-radius: var(--radius-lg);
+  display: inline-flex;
+  height: 2.5rem;
+  justify-content: center;
+  width: 2.5rem;
+}
+.tint-accent { background: var(--tint-accent); color: var(--accent); }
+.tint-ok     { background: var(--tint-ok);     color: var(--ok-text); }
+.tint-warn   { background: var(--tint-warn);   color: var(--warn-text); }
+.tint-neutral{ background: var(--tint-neutral); color: var(--text-muted); }
+
+.landing-foot {
+  border-top: var(--border-width) solid var(--border);
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+}
+
+@media (max-width: 900px) {
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-5);
+  }
+  .landing-headline {
+    max-width: none;
+  }
+  .features {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .features {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+  /* The reason column is the first thing to go when there is no room for it;
+     the score and the name carry the point. */
+  .hero-table th:nth-child(4),
+  .hero-table td:nth-child(4) {
+    display: none;
+  }
 }
 
 /* --- Desk: summary metrics ------------------------------------------------
@@ -1721,7 +1844,8 @@ pre {
 
 .metric-strip {
   border: var(--border-width) solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-raised);
   background: var(--surface);
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1871,57 +1995,329 @@ pre {
   }
 }
 
-/* --- Desk navigation -------------------------------------------------------
+/* ===========================================================================
+   The shared system — components/TopBar.tsx and components/ui.tsx
+   ===========================================================================
 
-   Quiet. A nav bar on an operations tool is furniture: it has to say where you
-   are and let you leave, and then get out of the way of the work. White ground,
-   one hairline under it, and the current item marked by weight and a rule
-   rather than by a filled block of colour. ---------------------------------- */
+   Everything below is styling for the shared components. Pages should reach
+   for these rather than inventing a surface, a table shell or a header of
+   their own; the point of the system is that a page added next year looks
+   like the rest without anyone remembering how.
+   =========================================================================== */
 
-.desk-nav {
+/* --- Top bar ---------------------------------------------------------------
+
+   On every page, for both audiences. Quiet furniture: white ground, one
+   hairline beneath, and the current item marked by weight and a rule rather
+   than a filled block of colour — a nav item that shouts competes with the
+   work. --------------------------------------------------------------------- */
+
+.topbar {
+  background: var(--surface);
+  border-bottom: var(--border-width) solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.topbar-inner {
+  align-items: center;
+  display: flex;
+  gap: var(--space-5);
+  margin: 0 auto;
+  max-width: var(--width-wide);
+  min-height: 3.25rem;
+  padding: 0 var(--space-4);
+}
+
+.brand {
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  gap: var(--space-2);
+  text-decoration: none;
+}
+.brand:hover {
+  text-decoration: none;
+}
+
+.brand-mark {
+  align-items: center;
+  background: var(--accent);
+  border-radius: var(--radius);
+  color: var(--accent-text-on);
+  display: inline-flex;
+  height: 1.5rem;
+  justify-content: center;
+  width: 1.5rem;
+}
+
+.topnav {
   display: flex;
   gap: var(--space-1);
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
-.desk-nav::-webkit-scrollbar {
+.topnav::-webkit-scrollbar {
   display: none;
 }
 
-.desk-nav-item {
+.topnav-item {
   border-bottom: 2px solid transparent;
   color: var(--text-muted);
   font-size: var(--text-sm);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-2);
   text-decoration: none;
   transition: color var(--transition), border-color var(--transition);
   white-space: nowrap;
 }
-.desk-nav-item:hover {
+.topnav-item:hover {
   color: var(--text);
   text-decoration: none;
 }
-.desk-nav-item.current {
+.topnav-item.current {
   border-bottom-color: var(--accent);
   color: var(--text);
   font-weight: var(--weight-medium);
 }
 
-/* --- Timeline: the raw event, when asked for -------------------------------
+.topbar-right {
+  align-items: center;
+  display: flex;
+  gap: var(--space-3);
+  margin-left: auto;
+}
 
-   Replaces .t-details, which printed the payload inline on every row. The
-   record is unchanged and still complete; what changed is that reading a
-   history no longer means reading five lines of JSON to find two words.
-   -------------------------------------------------------------------------- */
+/* --- Surface ---------------------------------------------------------------
 
+   The card. Named `.surface` because `.card` already means the health page's
+   status callout with its coloured left border, and one class name with two
+   meanings is how a stylesheet starts producing surprises. ------------------ */
+
+.surface {
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-raised);
+  margin-bottom: var(--space-4);
+  overflow: hidden;
+}
+
+.surface-head {
+  align-items: baseline;
+  border-bottom: var(--border-width) solid var(--border);
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+}
+
+.surface-title {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-label);
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.surface-action {
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+}
+
+.surface-body {
+  padding: var(--space-4);
+}
+/* For a table that should meet the card's edges rather than float inside it. */
+.surface-body.flush {
+  padding: 0;
+}
+.surface-body.flush .grid {
+  margin: 0;
+}
+
+/* --- Page header ----------------------------------------------------------- */
+
+.page-head {
+  margin-bottom: var(--space-4);
+}
+
+.page-head-row {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: space-between;
+}
+
+.page-head-text h1 {
+  margin: 0;
+}
+.page-head-text .sub {
+  margin: var(--space-1) 0 0;
+}
+
+.page-head-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* --- Disclosure body ------------------------------------------------------- */
+
+.disclosure-body {
+  padding: var(--space-4);
+}
+.disclosure-body > .grid,
+.disclosure-body > .table-scroll {
+  margin: 0;
+}
+
+/* --- Metric note ----------------------------------------------------------- */
+
+.metric-note {
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+}
+
+/* The strip sizes itself to however many metrics it was given, rather than
+   assuming four. */
+.metric-strip {
+  grid-template-columns: repeat(var(--metric-count, 4), minmax(0, 1fr));
+}
+
+@media (max-width: 720px) {
+  .metric-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .topbar-inner {
+    gap: var(--space-3);
+    padding: 0 var(--space-3);
+  }
+  .brand-name {
+    /* The mark alone at phone width; the name is the first thing that can go
+       when the nav needs the room. */
+    display: none;
+  }
+}
+
+/* The small marker in the bar. A companion to the full-width banner, never a
+   replacement for it — see the note in layout.tsx. */
+.demo-pill {
+  align-items: center;
+  background: var(--warn-bg);
+  border: var(--border-width) solid var(--warn-border);
+  border-radius: var(--radius-pill);
+  color: var(--warn-text);
+  display: inline-flex;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  white-space: nowrap;
+}
+
+/* ── Rules recovered after the restyle ────────────────────────────────────
+   These six blocks were dropped when the superseded CSS was removed, and
+   nothing failed loudly: the markup still carried the classes, so the pages
+   rendered with the classes inert. The visible symptom was on /stats, where
+   .stat-group-note's absence let a section's description inherit the
+   uppercase h2 and run into the heading — "WHERE EVERY APPLICATION
+   ISTHESE FIVE ACCOUNT FOR ALL 864".
+
+   A missing CSS rule is the quiet version of this project's recurring bug:
+   something that looks like it is doing a job and is not. The check that
+   found them is worth keeping — every class in the markup, matched against
+   every rule in the stylesheet — and it also shows .desk, .case-head-left
+   and .flag-reason have never had rules at all, which is reported separately
+   rather than invented here.
+   ------------------------------------------------------------------- */
+
+/* The applicant's progress through the flow, on /apply and /status. */
+.journey {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+}
+.journey-step {
+  align-items: center;
+  color: var(--text-dim);
+  display: flex;
+  font-size: var(--text-sm);
+  gap: var(--space-2);
+}
+.journey-step + .journey-step::before {
+  color: var(--border-control);
+  content: "\2192";
+  margin-right: var(--space-1);
+}
+.journey-step.now {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+/* A numbered circle: the second place a full radius is allowed, after the
+   pill. It is a step number, and a step number is a token, not a box. */
+.journey-num {
+  align-items: center;
+  background: var(--neutral-bg);
+  border-radius: 50%;
+  color: var(--neutral-text);
+  display: inline-flex;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  height: 1.25rem;
+  justify-content: center;
+  width: 1.25rem;
+}
+.journey-step.now .journey-num {
+  background: var(--accent);
+  color: var(--accent-text-on);
+}
+
+/* Section headings on /stats carry their own methodology line. It is a span
+   inside the h2 so it stays attached to the heading it qualifies — which
+   means it has to opt out of the h2's uppercase label treatment. */
+.stat-group {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-6) 0 var(--space-3);
+}
+.stat-group:first-of-type {
+  margin-top: var(--space-5);
+}
+.stat-group-note {
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+/* The methodology note already has padding from the disclosure body. */
+.method-disclosure .method-note {
+  border: none;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+}
+
+/* The raw event payload under a timeline entry. */
 .t-raw {
   /* flex-basis, not grid-column: .timeline li is a wrapping flex row, so this
      is what puts the disclosure on its own line beneath the event. */
   flex: 1 0 100%;
   margin-top: var(--space-1);
 }
-
 .t-raw > summary {
   color: var(--text-dim);
   cursor: pointer;
@@ -1940,13 +2336,9 @@ pre {
   display: inline-block;
   transition: transform var(--transition);
 }
-.t-raw[open] > summary::before {
-  transform: rotate(90deg);
-}
 .t-raw > summary:hover {
   color: var(--text);
 }
-
 .t-raw pre {
   background: var(--surface-raised);
   border: var(--border-width) solid var(--border);
@@ -1956,92 +2348,4 @@ pre {
   max-height: 20rem;
   overflow: auto;
   padding: var(--space-3);
-}
-
-/* --- Analytics: grouping ---------------------------------------------------
-
-   Ten undifferentiated tiles made a reader scan all of them to find either
-   kind of answer. Two groups with a heading each: throughput and timing, then
-   the accounting. ---------------------------------------------------------- */
-
-.stat-group {
-  align-items: baseline;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin: var(--space-6) 0 var(--space-3);
-}
-.stat-group:first-of-type {
-  margin-top: var(--space-5);
-}
-
-.stat-group-note {
-  color: var(--text-dim);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-normal);
-  letter-spacing: normal;
-  text-transform: none;
-}
-
-/* The methodology note. Full text, one click away — it is the most useful
-   paragraph on the page for someone deciding whether to trust the numbers, and
-   the least useful for someone reading the numbers. */
-.method-disclosure .method-note {
-  border: none;
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-}
-
-/* --- Applicant journey: the three steps ------------------------------------
-
-   Shown before the form rather than only once the applicant is inside the
-   process. A form that does not say how far it goes is a form people abandon
-   on the second field.
-
-   Numbered rather than a progress bar: three steps is a list, and a bar
-   implies a percentage the system cannot honestly give — step 2 ends whenever
-   the provider answers. ---------------------------------------------------- */
-
-.journey {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  list-style: none;
-  margin: 0 0 var(--space-4);
-  padding: 0;
-}
-
-.journey-step {
-  align-items: center;
-  color: var(--text-dim);
-  display: flex;
-  font-size: var(--text-sm);
-  gap: var(--space-2);
-}
-.journey-step + .journey-step::before {
-  color: var(--border-control);
-  content: "\2192";
-  margin-right: var(--space-1);
-}
-
-.journey-num {
-  align-items: center;
-  background: var(--neutral-bg);
-  border-radius: 50%;
-  color: var(--neutral-text);
-  display: inline-flex;
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-  height: 1.25rem;
-  justify-content: center;
-  width: 1.25rem;
-}
-
-.journey-step.now {
-  color: var(--text);
-  font-weight: var(--weight-medium);
-}
-.journey-step.now .journey-num {
-  background: var(--accent);
-  color: var(--accent-text-on);
 }

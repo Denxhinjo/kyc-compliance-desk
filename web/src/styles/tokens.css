@@ -125,7 +125,13 @@
   --n-100: #e9ecf0;  /* keycaps, chip grounds that carry no meaning */
   --n-200: #dfe3e8;  /* THE hairline — see --border */
   --n-300: #868f9a;  /* control edges — see --border-control */
-  --n-500: #68727e;  /* dim: present but not being read   (4.6:1 on ground) */
+  --n-500: #656f7b;  /* dim: present but not being read   (4.8:1 on ground)
+                        Two steps darker than it looks like it needs: at
+                        #68727e it cleared 4.5:1 on the ground and the card
+                        but reached only 4.40:1 inside an inset well
+                        (--surface-raised), which is where timeline payloads
+                        and metadata actually sit. Checked against the
+                        darkest background it lands on, not the lightest. */
   --n-600: #545c68;  /* muted: secondary text, labels     (6.4:1 on ground) */
   --n-900: #1c2026;  /* primary text                     (15.4:1 on ground) */
 
@@ -199,6 +205,18 @@
   --ok-bg: #e6f4ea;
   --ok-text: #0f5132;
   --ok-border: #9ed0b0;
+  /* Two strengths, because the soft edges above are decoration and these are
+     not. WCAG 1.4.11 wants 3:1 for anything needed to identify a UI component
+     or its state; it does not ask that of a callout's left bar, whose meaning
+     is in the heading beside it at 8.24:1. It does ask it of the approve and
+     reject buttons — whose tinted fill is 1.14:1 against the card, so the
+     border is the only thing drawing the button — and of an invalid input,
+     where the soft red was 1.97:1 and so marked an error by making the field's
+     outline HARDER to see than a valid one at 3.28:1.
+       --ok-border-strong   3.68:1 on the card, 3.24:1 on its own fill
+       --bad-border-strong  4.12:1 on the card, 3.61:1 on its own fill */
+  --ok-border-strong: #479467;
+  --bad-border-strong: #d1544f;
 
   --bad-bg: #fdeceb;
   --bad-text: #a4262c;
@@ -217,12 +235,45 @@
 
   /* --- Geometry ------------------------------------------------------------ */
 
-  /* ONE radius. 4px: enough to not look like an accident, small enough to read
-     as technical rather than friendly. Chips use it too — a fully rounded pill
-     belongs to a consumer product, not to a case management screen. */
+  /* THREE radii now, where there was one, and the reason is worth stating
+     because the old comment argued against exactly this.
+
+     It said a fully rounded pill "belongs to a consumer product, not to a case
+     management screen". That was right about a pill as decoration and wrong
+     about a pill as a SHAPE THAT MEANS SOMETHING: on a dense table, a rounded
+     chip is how the eye separates a status from the text beside it without a
+     second colour or a rule. The reference uses that distinction consistently
+     and it earns its place.
+
+     So the scale stays small and each step has a job:
+
+       --radius       4px   inputs, buttons, small controls. Unchanged.
+       --radius-lg    10px  cards and panels — the surfaces that sit ON the
+                            page rather than in a column of text
+       --radius-pill  999px badges only: risk score, outcome, status
+
+     Anything else still uses --radius. A fourth value would be the thing the
+     eye notices and cannot name. */
   --radius: 4px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
 
   --border-width: 1px;
+
+  /* --- Icon tints ----------------------------------------------------------
+
+     Soft squares behind the feature icons, as in the reference. Each is the
+     background of an EXISTING semantic colour rather than a new hue, so the
+     palette does not grow: the icon beside "audit trail" is the same green the
+     approved chip uses, and that is a small piece of consistency a reader
+     absorbs without noticing.
+
+     Only decoration carries these. Nothing load-bearing is coloured by them. */
+
+  --tint-accent: var(--accent-bg);
+  --tint-ok: var(--ok-bg);
+  --tint-warn: var(--warn-bg);
+  --tint-neutral: var(--n-100);
 
   /* The only two shadows in the system, and both are functional.
      Panels get no shadow at all: on a light ground a border does the job a
