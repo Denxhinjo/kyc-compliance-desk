@@ -70,6 +70,7 @@ from config import (
     SWEEP_INTERVAL_MINUTES,
     SWEEP_STUCK_MINUTES,
 )
+from audit import seeded_marker
 from handlers import handler
 from jobs import Job
 from result_handler import apply_result
@@ -202,6 +203,9 @@ def _record_not_found(
                 NOT_FOUND_ACTION,
                 Jsonb(
                     {
+                        # Carried through from the application's creation
+                        # event, so a seeded case's whole history is marked.
+                        **seeded_marker(conn, application_id),
                         "session_id": str(session_id),
                         "vendor": "the vendor has no record of this session",
                         "close_after": SESSION_NOT_FOUND_CLOSE_AFTER,
@@ -294,6 +298,7 @@ def _close_if_confirmed_missing(
                 CLOSED_ACTION,
                 Jsonb(
                     {
+                        **seeded_marker(conn, application_id),
                         "from_status": current_status,
                         "session_id": str(session_id),
                         "not_found_answers": seen,
@@ -367,6 +372,7 @@ def expire_abandoned(conn: psycopg.Connection) -> int:
                     EXPIRED_ACTION,
                     Jsonb(
                         {
+                            **seeded_marker(conn, application_id),
                             "from_status": "started",
                             "after_days": ABANDONED_EXPIRY_DAYS,
                             "reason": (

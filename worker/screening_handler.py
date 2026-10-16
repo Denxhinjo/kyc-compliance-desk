@@ -22,7 +22,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from audit import log_event
+from audit import log_event, seeded_marker
 from config import SANCTIONS_SOURCE
 from handlers import PermanentError, handler
 from jobs import Job
@@ -244,6 +244,9 @@ def _store_assessment(
         actor="system:worker",
         action="screening.completed",
         details={
+            # The seeder's mark, carried through from the application's own
+            # creation event. See seeded_marker().
+            **seeded_marker(conn, application["id"]),
             "score": assessment.score,
             "routing": assessment.routing,
             "ruleset_version": assessment.ruleset_version,
@@ -288,6 +291,7 @@ def _route(
             actor="system:worker",
             action="decision.recorded",
             details={
+                **seeded_marker(conn, application_id),
                 "outcome": "referred",
                 "decided_by": "system",
                 "score": assessment.score,
@@ -320,6 +324,7 @@ def _route(
         actor="system:worker",
         action="decision.recorded",
         details={
+            **seeded_marker(conn, application_id),
             "outcome": outcome,
             "decided_by": "system",
             "score": assessment.score,

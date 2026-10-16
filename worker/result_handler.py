@@ -28,7 +28,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from audit import log_event
+from audit import log_event, seeded_marker
 from handlers import PermanentError, handler
 from jobs import Job, enqueue_job
 from lifecycle import Evaluation, Outcome, evaluate_vendor_result
@@ -211,6 +211,10 @@ def apply_result(
         actor="system:worker",
         action="status.changed",
         details={
+            # Carry the seeder's mark through. The worker has no notion of a
+            # seeder; it reads the application's own immutable creation event.
+            # See seeded_marker() for why this is not a column.
+            **seeded_marker(conn, application["id"]),
             "from": application["status"],
             "to": evaluation.target,
             "vendor_status": result.status,
@@ -268,6 +272,7 @@ def _record_refusal(
         actor="system:worker",
         action="vendor_result.refused",
         details={
+            **seeded_marker(conn, application["id"]),
             "outcome": evaluation.outcome,
             "reason": evaluation.reason,
             "current_status": application["status"],
