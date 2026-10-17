@@ -184,14 +184,31 @@ def _store_matches(
                     match.entry.list_name,
                     match.matched_name,
                     match.entry.entity_id,
-                    round(match.score, 2),
+                    # THE RULESET'S OWN SCORE, not the retrieval score.
+                    #
+                    # These two numbers differ under 2026-10-2 and the officer
+                    # sees this one, in a column headed STRENGTH, directly
+                    # under a flag that quotes the other. Storing the
+                    # retrieval score here put "100%" beside "partial, 67%" on
+                    # the same screen -- reinstating, in the evidence table,
+                    # exactly the figure this version exists to stop showing.
+                    #
+                    # The retrieval score is kept in the payload: it is why
+                    # the candidate surfaced at all, which is worth being able
+                    # to answer, but it is not the strength of the match.
+                    round(match.name_score, 2),
                     Jsonb(
                         {
                             "primary_name": match.entry.name,
                             "aliases": list(match.entry.aliases),
                             "countries": list(match.entry.countries),
                             "listed_date_of_birth": match.entry.date_of_birth,
+                            "listed_dates_of_birth": list(match.entry.dates_of_birth),
                             "date_of_birth_conflict": match.date_of_birth_conflict,
+                            "retrieval_score": round(match.score, 2),
+                            "identifier_comparisons": [
+                                c.as_dict() for c in match.comparisons
+                            ],
                         }
                     ),
                     snapshot_id,

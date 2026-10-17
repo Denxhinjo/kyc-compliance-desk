@@ -61,6 +61,7 @@ export default function Home() {
             </svg>
           </span>
           <h2>Scores that say why</h2>
+          <p>Fixed points, each with its reason.</p>
         </article>
 
         <article className="feature">
