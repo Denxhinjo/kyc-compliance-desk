@@ -68,7 +68,20 @@ from typing import Any, Mapping
 #:
 #: -1 remains resolvable. Nothing rewrites those rows: they say -1, they were
 #: scored against the -1 list, and that statement stays true.
-RULESET_VERSION = "2026-10-1"
+RULESET_VERSION = "2026-10-2"
+
+#: Which similarity definition this ruleset scores names with.
+#:
+#: THIS IS THE SWITCH. There is no feature flag: the ruleset in force selects
+#: the definition, so a decision stamped 2026-10-1 can never carry a v2 score
+#: and nothing stamped 2026-10-2 can carry a v1 one. A flag would have let the
+#: same version mean two different things depending on when it ran, which
+#: makes "reconstruct any decision" false.
+#:
+#: 2026-10-1's recorded row names no definition, because `rulesets` is
+#: append-only and cannot be amended. An absent key therefore MEANS v1. See
+#: screening/index.py:DEFAULT_SIMILARITY.
+NAME_SIMILARITY = "v2-symmetric-coverage"
 #:
 #: -1 moved to -2 on 2026-09-24 when the increased-monitoring list was replaced
 #: wholesale. -2 moved to 2026-10-1 on 2026-10-07 when the call-for-action list
@@ -100,6 +113,28 @@ class ScreeningHit:
     entity_id: str | None = None
     #: The list publishes a date of birth and it disagrees with the applicant's.
     date_of_birth_conflict: bool = False
+    #: Every secondary identifier, already compared: a tuple of dicts shaped
+    #: {identifier, outcome, detail}. Scoring reads `outcome`; the interface
+    #: shows `detail`. Empty under 2026-10-1, which compared none.
+    comparisons: tuple[Mapping[str, str], ...] = ()
+
+    def conflicting_identifiers(self) -> tuple[str, ...]:
+        """Which identifiers CONTRADICT this match.
+
+        Falls back to `date_of_birth_conflict` when no structured comparisons
+        were supplied. There are two representations of the same fact here --
+        the boolean predates the comparisons and is still what the v1 path
+        produces -- and reading only the newer one would quietly drop a
+        conflict that a caller DID report, scoring a contradicted match at
+        full strength. Two sources for one fact is a trap whichever way it is
+        read; this reads both.
+        """
+        found = tuple(
+            c["identifier"] for c in self.comparisons if c.get("outcome") == "conflict"
+        )
+        if found:
+            return found
+        return ("date_of_birth",) if self.date_of_birth_conflict else ()
 
 
 @dataclass(frozen=True)
@@ -510,6 +545,20 @@ class RiskAssessment:
 #: Bands do not pretend to: the ambiguous range contributes points without ever
 #: being decisive on its own, which routes it to a human. That is not a fudge,
 #: it is the correct handling of genuine uncertainty.
+#: Name-strength cut-offs.
+#:
+#: `exact` is 100 and nothing less. Under v1 that would have been unusable --
+#: a subset scored 100 routinely -- which is exactly why it could not be the
+#: bar before. Under v2 only an identical normalised name reaches it.
+EXACT = 100.0
+STRONG = 80.0
+#: Everything recorded that is not exact or strong. The floor is the retrieval
+#: threshold, not a second opinion about it: if a pair was worth recording, the
+#: reviewer sees it with a strength on it.
+PARTIAL = 0.0
+
+#: The pre-2026-10-2 cut-offs, kept so a decision taken under an earlier
+#: ruleset can still be reproduced. Not used for new scoring.
 CONFIRMED = 92.0
 PROBABLE = 85.0
 WEAK = 80.0
@@ -539,7 +588,10 @@ WEAK = 80.0
 #:
 #: Recall is unaffected: the match is still found, still recorded, still shown
 #: to an officer. Only the automatic refusal is withdrawn.
-SANCTIONS_POINTS = {"confirmed": 60, "probable": 45, "weak": 20}
+#: The old numbers, moved onto the new bands. Nothing is worth more or less
+#: than it was; what changed is which matches land in which band, because the
+#: similarity definition stopped handing 100 to a subset.
+SANCTIONS_POINTS = {"exact": 60, "strong": 45, "partial": 20}
 
 #: PEPs. Deliberately incapable of causing an automatic rejection.
 #:
@@ -548,9 +600,9 @@ SANCTIONS_POINTS = {"confirmed": 60, "probable": 45, "weak": 20}
 #: source-of-wealth checks, ongoing monitoring — which means a human. Wholesale
 #: refusal of PEPs ("de-risking") is something regulators criticise, so the
 #: maximum here is set below the rejection threshold on purpose.
-PEP_POINTS = {"confirmed": 30, "probable": 15, "weak": 5}
+PEP_POINTS = {"exact": 30, "strong": 15, "partial": 5}
 
-ADVERSE_MEDIA_POINTS = {"confirmed": 10, "probable": 10, "weak": 5}
+ADVERSE_MEDIA_POINTS = {"exact": 10, "strong": 10, "partial": 5}
 
 
 COUNTRY_CALL_FOR_ACTION_POINTS = 40
@@ -576,25 +628,56 @@ DOCUMENT_MISSING_POINTS = 30
 
 
 def band_of(score: float) -> str | None:
-    if score >= CONFIRMED:
-        return "confirmed"
-    if score >= PROBABLE:
-        return "probable"
-    if score >= WEAK:
-        return "weak"
+    """NAME MATCH STRENGTH. Never a verdict.
+
+    The old names were "confirmed", "probable" and "weak", and the first of
+    them was the most misleading word in the system: it announced, from a
+    string comparison alone, the conclusion that a compliance reviewer exists
+    to reach. In compliance a name match is a POTENTIAL match; whether it is
+    the same person depends on secondary identifiers and is decided by a
+    human. "Confirmed match" and "false positive" are reviewer outcomes now,
+    and the system emits neither.
+
+    `exact` is reserved for a name that is the SAME name: the two normalised
+    token multisets are equal. Under the v2 definition only such a pair can
+    reach 100, so this threshold and that property agree by construction.
+    """
+    if score >= EXACT:
+        return "exact"
+    if score >= STRONG:
+        return "strong"
+    # STRICTLY greater: a score of 0 means nothing aligned at all, which is no
+    # match rather than a weak one. The noise floor that keeps rubbish out of
+    # the queue is RECORD_THRESHOLD, applied during retrieval, where it can
+    # actually prevent the work -- not a second opinion applied here after the
+    # pair has already been found and stored.
+    if score > PARTIAL:
+        return "partial"
     return None
 
 
 def _downgrade(band: str) -> str:
-    """One band weaker. How a conflicting date of birth is expressed.
+    """One band weaker. How 2026-10-1 and earlier expressed a date conflict.
 
-    Dropping a band rather than scaling the points, because the result has to
-    be sayable in a sentence: "the name matched at 93, but the listed date of
-    birth is 1944 and this applicant was born in 1983, so it is treated as
-    probable rather than confirmed." A multiplier produces a number nobody can
-    defend in those terms.
+    Kept so an older decision can be reproduced. New scoring uses
+    `_conflicted_points`, which drops straight to the weakest band instead of
+    stepping down one.
     """
     return {"confirmed": "probable", "probable": "weak", "weak": "weak"}[band]
+
+
+def _conflicted_points(points_table: Mapping[str, int]) -> int:
+    """What a hit scores when a secondary identifier CONTRADICTS it.
+
+    The weakest band for that match type -- 20 for sanctions, which is what
+    2026-10-2 specifies. Not zero: the list entry was still found, the
+    reviewer still has to look at it, and a conflicting date of birth is the
+    list's claim rather than a proven fact. Not a one-band step either: a
+    contradicted exact match and a contradicted partial one are in the same
+    position, and ranking the first above the second says something the
+    evidence does not support.
+    """
+    return points_table["partial"]
 
 
 # ---------------------------------------------------------------------------
@@ -621,22 +704,49 @@ def _strongest(hits: tuple[ScreeningHit, ...], match_type: str) -> ScreeningHit 
 def _match_signal(
     hit: ScreeningHit, points_table: Mapping[str, int], code_prefix: str, label: str
 ) -> Signal | None:
-    band = band_of(hit.match_score)
-    if band is None:
+    """One list match, turned into points and a sentence.
+
+    THE SENTENCE NEVER SAYS "CONFIRMED". It reports two separate things -- how
+    alike the names are, and what the secondary identifiers say -- and leaves
+    the conclusion to whoever has to defend it.
+    """
+    strength = band_of(hit.match_score)
+    if strength is None:
         return None
 
-    effective = _downgrade(band) if hit.date_of_birth_conflict else band
-    points = points_table[effective]
+    conflicts = hit.conflicting_identifiers()
+    if conflicts:
+        points = _conflicted_points(points_table)
+        code = f"{code_prefix}_contradicted"
+    else:
+        points = points_table[strength]
+        code = f"{code_prefix}_{strength}"
 
     reason = (
-        f"{label} match against \"{hit.matched_name}\" on {hit.list_name} "
-        f"at {hit.match_score:.0f}% name similarity ({effective})"
+        f"{label} name match ({strength}, {hit.match_score:.0f}%) against "
+        f"\"{hit.matched_name}\" on {hit.list_name}"
     )
-    if hit.date_of_birth_conflict:
-        reason += "; downgraded because the listed date of birth conflicts"
+
+    # Identifiers, in the reviewer's words, conflicts first. A reviewer
+    # deciding "same person or not" is reading this line, so what the list
+    # does NOT say is reported as plainly as what it does.
+    if hit.comparisons:
+        ordered = sorted(
+            hit.comparisons, key=lambda c: c.get("outcome") != "conflict"
+        )
+        parts = [
+            f"{c['identifier'].replace('_', ' ')}: {c['outcome'].replace('_', ' ')}"
+            for c in ordered
+        ]
+        reason += ". " + "; ".join(parts)
+    if conflicts:
+        reason += (
+            f". Scored at the weakest band because "
+            f"{' and '.join(c.replace('_', ' ') for c in conflicts)} contradicts it"
+        )
 
     return Signal(
-        code=f"{code_prefix}_{effective}",
+        code=code,
         points=points,
         reason=reason,
         evidence={
@@ -644,7 +754,9 @@ def _match_signal(
             "matched_name": hit.matched_name,
             "match_score": round(hit.match_score, 1),
             "entity_id": hit.entity_id,
-            "band": effective,
+            "name_match_strength": strength,
+            "identifier_comparisons": [dict(c) for c in hit.comparisons],
+            "contradicted_by": list(conflicts),
             "date_of_birth_conflict": hit.date_of_birth_conflict,
         },
     )
@@ -796,10 +908,40 @@ def score_application(
         signals.extend(rule(profile))
 
     total = sum(signal.points for signal in signals)
+    routing = route(total, thresholds)
+
+    # A SANCTIONS HIT ALWAYS GOES TO A HUMAN. 2026-10-2.
+    #
+    # This withdraws a rule the previous version stated deliberately. Up to
+    # 2026-10-1 the argument above SANCTIONS_POINTS read:
+    #
+    #     "So 'confirmed' is 60: enough to guarantee review, not enough to
+    #      refuse anyone by itself. Reaching 80 needs a second, independent
+    #      signal -- a failed document check, a call-for-action jurisdiction."
+    #
+    # That second route to automatic refusal is now closed, for two reasons.
+    #
+    # A genuine sanctions match must be ESCALATED AND REPORTED, not silently
+    # refused. Quietly turning away a listed person is not the cautious
+    # outcome; it loses the one case a compliance function exists to act on.
+    #
+    # And the arithmetic was backwards at the weak end. Enumerating all 720
+    # combinations of a recorded sanctions hit against every other signal,
+    # 481 of them (66.8%) reached the auto-reject threshold, the smallest
+    # being: a hit the list's OWN date of birth contradicts (20) + a
+    # call-for-action country (40) + an in-progress document check (20) = 80.
+    # That is an automatic refusal of someone the evidence suggests is a
+    # different person entirely.
+    #
+    # Auto-approval was never reachable -- the weakest sanctions band is 20
+    # and the threshold is "below 20" -- so only the rejection half needed
+    # closing. Both halves are asserted in tests/test_sanctions_routing.py.
+    if any(hit.match_type == "sanctions" for hit in profile.hits):
+        routing = Routing.REVIEW
 
     return RiskAssessment(
         score=total,
         signals=tuple(signals),
-        routing=route(total, thresholds),
+        routing=routing,
         thresholds=thresholds,
     )

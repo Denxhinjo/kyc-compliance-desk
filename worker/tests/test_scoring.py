@@ -86,15 +86,22 @@ def test_a_passed_document_check_earns_no_credit():
 @pytest.mark.parametrize(
     "score,band,points",
     [
-        (100.0, "confirmed", SANCTIONS_POINTS["confirmed"]),
-        (92.0, "confirmed", SANCTIONS_POINTS["confirmed"]),
-        (91.9, "probable", SANCTIONS_POINTS["probable"]),
-        (85.0, "probable", SANCTIONS_POINTS["probable"]),
-        (84.9, "weak", SANCTIONS_POINTS["weak"]),
-        (80.0, "weak", SANCTIONS_POINTS["weak"]),
+        (100.0, "exact", SANCTIONS_POINTS["exact"]),
+        (99.9, "strong", SANCTIONS_POINTS["strong"]),
+        (92.0, "strong", SANCTIONS_POINTS["strong"]),
+        (80.0, "strong", SANCTIONS_POINTS["strong"]),
+        (79.9, "partial", SANCTIONS_POINTS["partial"]),
+        (50.0, "partial", SANCTIONS_POINTS["partial"]),
+        (0.1, "partial", SANCTIONS_POINTS["partial"]),
     ],
 )
 def test_sanctions_bands(score, band, points):
+    """`exact` is 100 and nothing else.
+
+    Under the v1 scorer that bar would have been meaningless -- a name sitting
+    inside a longer one scored 100 routinely. Under v2 only an identical
+    normalised name reaches it, which is what makes the word usable.
+    """
     assessment = score_application(profile(hits=(hit("sanctions", score),)))
     assert band_of(score) == band
     assert assessment.score == points
@@ -112,9 +119,14 @@ def test_a_confirmed_sanctions_match_alone_reviews_rather_than_rejects():
     were auto-rejected. On a book of 100,000 that is 580 real customers refused
     by a string comparison.
 
-    So a name match alone guarantees REVIEW and never refusal. Refusal needs a
-    second independent signal. Recall is untouched — the match is still found,
-    recorded and shown to an officer; only the automatic refusal is withdrawn.
+    So a name match alone guarantees REVIEW and never refusal.
+
+    UNDER 2026-10-2 THE SECOND-SIGNAL ROUTE IS CLOSED TOO. This test used to
+    end by asserting that a corroborating signal made refusal automatic. It no
+    longer does: see test_sanctions_routing.py, which asserts the stronger
+    property across every combination, and the change note on ruleset
+    2026-10-2 for why a genuine match must be escalated and reported rather
+    than silently refused.
 
     This is also what firms actually do: a potential match is escalated and a
     human confirms identity before the firm acts.
@@ -122,11 +134,11 @@ def test_a_confirmed_sanctions_match_alone_reviews_rather_than_rejects():
     alone = score_application(profile(hits=(hit("sanctions", 97.0),)))
     assert alone.routing == Routing.REVIEW
 
-    # A second, independent signal is what makes refusal automatic.
+    # Once enough to refuse automatically; now still a review.
     corroborated = score_application(
         profile(hits=(hit("sanctions", 97.0),), vendor_status="Declined")
     )
-    assert corroborated.routing == Routing.REJECT
+    assert corroborated.routing == Routing.REVIEW
 
 
 def test_no_single_signal_can_auto_reject():
@@ -149,9 +161,9 @@ def test_no_single_signal_can_auto_reject():
 @pytest.mark.parametrize(
     "score,points",
     [
-        (95.0, PEP_POINTS["confirmed"]),
-        (87.0, PEP_POINTS["probable"]),
-        (81.0, PEP_POINTS["weak"]),
+        (100.0, PEP_POINTS["exact"]),
+        (87.0, PEP_POINTS["strong"]),
+        (51.0, PEP_POINTS["partial"]),
     ],
 )
 def test_pep_bands(score, points):
@@ -178,16 +190,28 @@ def test_a_pep_match_can_never_cause_an_automatic_rejection():
         )
     )
     # It may well be reviewed, and should be. It must not be rejected for this.
-    assert PEP_POINTS["confirmed"] < Thresholds().auto_reject_at_or_above
+    assert PEP_POINTS["exact"] < Thresholds().auto_reject_at_or_above
     assert score_application(profile(hits=(hit("pep", 100.0),))).routing == Routing.REVIEW
     assert worst.routing in (Routing.REVIEW, Routing.REJECT)
     # ... and if it IS rejected, it must be the country and the documents doing
     # it, never the PEP status alone.
-    assert worst.score - PEP_POINTS["confirmed"] >= Thresholds().auto_reject_at_or_above
+    assert worst.score - PEP_POINTS["exact"] >= Thresholds().auto_reject_at_or_above
 
 
-def test_a_match_below_the_noise_floor_scores_nothing():
-    assert score_application(profile(hits=(hit("sanctions", 79.9),))).score == 0
+def test_only_a_non_match_scores_nothing():
+    """The noise floor is RECORD_THRESHOLD, applied during retrieval.
+
+    This used to assert that 79.9 scored zero, because the weakest band began
+    at 80. Under v2 a recorded match routinely scores below 80 -- "Carlos
+    Fernandez" against "Carlos Ariel FERNANDEZ CONCEPCION" is 66.7 -- and it
+    is still a candidate a reviewer must see. A second floor here would have
+    silently discarded exactly the partial matches this version exists to
+    label honestly.
+
+    Zero still means zero: nothing aligned, so there is no match to band.
+    """
+    assert score_application(profile(hits=(hit("sanctions", 79.9),))).score == 20
+    assert score_application(profile(hits=(hit("sanctions", 0.0),))).score == 0
 
 
 @pytest.mark.parametrize("country", sorted(FATF_CALL_FOR_ACTION))
@@ -247,9 +271,9 @@ def test_many_weak_matches_do_not_add_up():
     Summing them would push an ordinary applicant past the rejection threshold
     for the offence of having an ordinary name. Only the strongest counts.
     """
-    many = tuple(hit("sanctions", 80.0, entity_id=f"E-{i}") for i in range(5))
+    many = tuple(hit("sanctions", 66.7, entity_id=f"E-{i}") for i in range(5))
     assessment = score_application(profile(hits=many))
-    assert assessment.score == SANCTIONS_POINTS["weak"]
+    assert assessment.score == SANCTIONS_POINTS["partial"]
     assert assessment.routing == Routing.REVIEW
 
 
@@ -264,9 +288,9 @@ def test_the_number_of_candidates_is_reported_even_though_it_scores_nothing():
 
 def test_sanctions_and_pep_are_scored_separately():
     assessment = score_application(
-        profile(hits=(hit("sanctions", 95.0, entity_id="S1"), hit("pep", 95.0, entity_id="P1")))
+        profile(hits=(hit("sanctions", 100.0, entity_id="S1"), hit("pep", 100.0, entity_id="P1")))
     )
-    assert assessment.score == SANCTIONS_POINTS["confirmed"] + PEP_POINTS["confirmed"]
+    assert assessment.score == SANCTIONS_POINTS["exact"] + PEP_POINTS["exact"]
 
 
 # ---------------------------------------------------------------------------
@@ -274,13 +298,20 @@ def test_sanctions_and_pep_are_scored_separately():
 # ---------------------------------------------------------------------------
 
 
-def test_a_conflicting_date_of_birth_downgrades_one_band():
-    confirmed = score_application(profile(hits=(hit("sanctions", 97.0),)))
-    conflicted = score_application(profile(hits=(hit("sanctions", 97.0, dob_conflict=True),)))
+def test_a_conflicting_date_of_birth_drops_to_the_weakest_band():
+    """Straight to the weakest band, not one step down.
 
-    assert confirmed.score == SANCTIONS_POINTS["confirmed"]
-    assert conflicted.score == SANCTIONS_POINTS["probable"]
-    assert "date of birth conflicts" in conflicted.signals[0].reason
+    2026-10-1 stepped down one band, which ranked a contradicted exact match
+    above a contradicted partial one. The evidence does not support that
+    ordering: in both cases the list's own date of birth says this is somebody
+    else, and how alike the names are does not change that.
+    """
+    clean = score_application(profile(hits=(hit("sanctions", 100.0),)))
+    conflicted = score_application(profile(hits=(hit("sanctions", 100.0, dob_conflict=True),)))
+
+    assert clean.score == SANCTIONS_POINTS["exact"]
+    assert conflicted.score == SANCTIONS_POINTS["partial"]
+    assert "contradicts it" in conflicted.signals[0].reason
 
 
 def test_a_conflicting_date_of_birth_stops_an_automatic_rejection():
@@ -291,9 +322,9 @@ def test_a_conflicting_date_of_birth_stops_an_automatic_rejection():
     assert assessment.routing == Routing.REVIEW
 
 
-def test_a_weak_match_cannot_be_downgraded_below_weak():
+def test_a_partial_match_cannot_be_downgraded_below_partial():
     assessment = score_application(profile(hits=(hit("sanctions", 80.0, dob_conflict=True),)))
-    assert assessment.score == SANCTIONS_POINTS["weak"]
+    assert assessment.score == SANCTIONS_POINTS["partial"]
 
 
 # ---------------------------------------------------------------------------

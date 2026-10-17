@@ -59,26 +59,51 @@ if str(WORKER) not in sys.path:
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
 log = logging.getLogger("api.drain")
 
+#: GitHub Actions' secret.
 DRAIN_SECRET = os.environ.get("DRAIN_SECRET", "")
+#: The external scheduler's secret (cron-job.org), which calls this every ten
+#: minutes because GitHub's hourly schedule fires about five times a day.
+#:
+#: TWO SECRETS, NOT ONE SHARED ONE, so that either caller can be revoked
+#: without silencing the other. They are different parties: one is a workflow
+#: in this repository, the other is an account on somebody else's website.
+#: Sharing a secret between them would mean that rotating it after the
+#: third party is compromised also stops the backup that exists to cover
+#: exactly that.
+DRAIN_SECRET_SCHEDULER = os.environ.get("DRAIN_SECRET_SCHEDULER", "")
 HEADER = "x-drain-secret"
 
 
 def authorised(headers) -> bool:
-    """Constant-time comparison of a shared secret.
+    """Constant-time comparison against each configured secret.
 
     compare_digest rather than `==` for the usual reason: `==` on strings
     returns as soon as two bytes differ, and the time it took is a
     character-by-character oracle. The window is small over a network and the
     correct comparison costs nothing.
 
-    An unset DRAIN_SECRET refuses everything rather than allowing everything.
-    A deployment that forgot to set it should be visibly broken, not quietly
-    open.
+    EVERY configured secret is compared, and the results are combined after
+    the loop rather than returning on the first match. Returning early would
+    reintroduce the timing oracle this function exists to avoid: how long the
+    refusal took would say which secrets were set.
+
+    With no secret set at all this refuses everything rather than allowing
+    everything. A deployment that forgot to configure one should be visibly
+    broken, not quietly open.
     """
-    if not DRAIN_SECRET:
-        log.error("DRAIN_SECRET is not set — refusing every request")
+    configured = [s for s in (DRAIN_SECRET, DRAIN_SECRET_SCHEDULER) if s]
+    if not configured:
+        log.error(
+            "neither DRAIN_SECRET nor DRAIN_SECRET_SCHEDULER is set — "
+            "refusing every request"
+        )
         return False
-    return hmac.compare_digest(headers.get(HEADER, ""), DRAIN_SECRET)
+    offered = headers.get(HEADER, "")
+    accepted = False
+    for secret in configured:
+        if hmac.compare_digest(offered, secret):
+            accepted = True
+    return accepted
 
 
 class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel requires this name
@@ -146,7 +171,18 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel requires this na
             {
                 "service": "drain",
                 "usage": f"POST with the {HEADER} header",
-                "secret_configured": bool(DRAIN_SECRET),
+                "secret_configured": bool(DRAIN_SECRET or DRAIN_SECRET_SCHEDULER),
+                # Which callers are configured, never the values. Useful when
+                # the scheduler starts returning 401 and the question is
+                # whether the variable reached this deployment at all.
+                "accepts": [
+                    name
+                    for name, value in (
+                        ("github", DRAIN_SECRET),
+                        ("scheduler", DRAIN_SECRET_SCHEDULER),
+                    )
+                    if value
+                ],
             },
         )
 
