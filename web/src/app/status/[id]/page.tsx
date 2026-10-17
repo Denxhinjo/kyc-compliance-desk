@@ -183,18 +183,20 @@ export default async function StatusPage({
             had — or, as it did before these states existed, drawing it with no
             stage reached at all — misrepresents what happened. */}
         {!OFF_RAMPS.includes(application.status) && (
-          <ol className="stages">
+          <ol className="journey" aria-label="Application progress">
             {LIFECYCLE.map((stage, i) => (
               <li
                 key={stage}
                 className={
                   i < stageIndex
-                    ? "stage done"
+                    ? "journey-step done"
                     : i === stageIndex
-                      ? "stage now"
-                      : "stage"
+                      ? "journey-step now"
+                      : "journey-step"
                 }
+                aria-current={i === stageIndex ? "step" : undefined}
               >
+                <span className="journey-num">{i + 1}</span>
                 {STATUS_COPY[stage].label}
               </li>
             ))}
