@@ -7,7 +7,7 @@ import { startVerification } from "./actions";
 function Button() {
   const { pending } = useFormStatus();
   return (
-    <button type="submit" className="button" disabled={pending}>
+    <button type="submit" className="button button-primary" disabled={pending}>
       {pending ? "Contacting provider…" : "Continue to verification"}
     </button>
   );
