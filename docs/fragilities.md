@@ -255,3 +255,52 @@ output through the form's validator needs the same filter. The honest fix is in
 rather than clamping the sampled age — which would make the generator correct
 for every consumer at the cost of a slight change to the age distribution at
 its lower bound.
+
+---
+
+## Imprecise listed dates of birth are compared at no precision at all
+
+**How it shows up.** It does not, today. It is a deliberate under-use of
+evidence that ruleset 2026-10-2 accepts for now and should not accept forever.
+
+**Why.** OFAC publishes a date of birth for 99.1% of its individuals, but 260
+of those values in the 2026-10-15 snapshot are not single precise dates. They
+fall into four shapes:
+
+| shape | count | example |
+|---|---:|---|
+| `YYYY to YYYY` | 72 | `1950 to 1955` |
+| `circa YYYY` | 65 | `circa 1951` |
+| `DD Mon YYYY to DD Mon YYYY` | 53 | `02 Jan 1960 to 05 Jan 1960` |
+| `Mon YYYY` (and `Mon YYYY to Mon YYYY`) | ~70 | `Mar 1962` |
+
+`screening/identifiers.py` treats every one of them as incapable of producing
+a conflict, and -- the tightening that makes this deliberate rather than
+accidental -- an imprecise value blocks a conflict even when precise dates are
+listed alongside it and disagree.
+
+That rule is exactly right for `circa`, which is an admission of uncertainty
+with no stated bound. It is **too conservative for the other three**, which do
+state a bound. An applicant born in 1990 is outside `1950 to 1955` and outside
+`Mar 1962` by any reading, and the list has said so. Today the system records
+"not available" and says nothing.
+
+**Why it is tolerable now.** Every recorded sanctions hit routes to a human
+under 2026-10-2, so the cost is a reviewer reading one more case rather than a
+wrong automatic outcome. The failure is a missed opportunity to help, not a
+wrong answer. The imprecise value is also shown to the reviewer verbatim, so
+the evidence is in front of the person deciding even when the system declines
+to draw from it.
+
+**The fix, when it is worth doing.** Compare each shape at its own precision,
+and let a value conflict when the applicant falls outside the range it states:
+
+- `YYYY to YYYY` and `Mon YYYY to Mon YYYY` -- an interval; outside it is a
+  conflict, inside is an agreement no stronger than `year_agrees`.
+- `Mon YYYY` -- a month; a different month or year is a conflict.
+- `circa YYYY` -- keep as it is. "Circa" states no bound, and inventing one
+  (say, plus or minus two years) would be the system manufacturing a tolerance
+  the publisher never gave it.
+
+Anything that changes which cases conflict changes scoring inputs, so it needs
+its own ruleset version, not an edit to 2026-10-2.
