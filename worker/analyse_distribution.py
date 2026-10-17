@@ -32,6 +32,7 @@ from collections import Counter
 from scoring import (
     CALL_FOR_ACTION,
     INCREASED_MONITORING,
+    SANCTIONS_POINTS,
     ApplicantProfile,
     Routing,
     ScreeningHit,
@@ -249,7 +250,10 @@ def main() -> int:
 
     print(f"\n{'=' * 62}\nFALSE POSITIVES: ORDINARY APPLICANTS FLAGGED\n{'=' * 62}")
     print(f"  {ordinary_total} applicants were on no list at all.\n")
-    for band in ("confirmed", "probable", "weak"):
+    # The bands this reports are whatever the ruleset in force defines, so the
+    # script keeps working across a vocabulary change instead of silently
+    # printing zeroes for three names that no longer exist.
+    for band in SANCTIONS_POINTS:
         n = false_positive_bands[band]
         if n:
             print(f"  matched at {band:<10} {n:4d}   {100 * n / ordinary_total:5.2f}%")

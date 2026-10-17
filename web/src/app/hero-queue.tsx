@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { pool } from "@/lib/db";
+import { CURRENT_RULESET } from "@/lib/ruleset";
 
 /**
  * The hero visual: a live slice of the real review queue.
@@ -58,8 +59,20 @@ async function peekQueue(): Promise<HeroRow[] | null> {
           and not exists (select 1 from decisions t
                            where t.application_id = a.id
                              and t.outcome in ('approved','rejected'))
+          -- TODAY'S VOCABULARY ONLY.
+          --
+          -- Reason text is frozen evidence and is never rewritten, so cases
+          -- scored under 2026-10-1 still read "...at 100% name similarity
+          -- (confirmed)" -- a label that version derived from name similarity
+          -- alone, with a scorer that gave 100% to a name appearing inside a
+          -- longer one. True of that decision, and exactly the claim this
+          -- project should not be putting on its front page. They stay
+          -- readable on their own case pages, where the note above them says
+          -- which version's vocabulary they use.
+          and a.risk_ruleset_version = $1
         order by r.decided_at asc
         limit 4`,
+      [CURRENT_RULESET],
     );
     return rows;
   } catch {
@@ -88,9 +101,15 @@ export async function HeroQueue() {
 
       {rows === null || rows.length === 0 ? (
         <p className="hero-visual-empty">
+          {/* "No case is waiting" would be false here. The query is narrowed to
+              cases scored under the current ruleset, so an empty result means
+              either an empty queue or a queue whose cases all predate it --
+              and right after a rules change it is always the second. Saying
+              the first would be the front page making a claim about the
+              database that the database does not support. */}
           {rows === null
             ? "The queue is not reachable right now."
-            : "No case is waiting for a reviewer."}
+            : "No case has been scored under the current rules yet."}
         </p>
       ) : (
         <table className="hero-table">

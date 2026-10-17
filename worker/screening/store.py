@@ -30,7 +30,13 @@ from dataclasses import dataclass
 
 import psycopg
 
+from .identifiers import (
+    compare_dates_of_birth,
+    compare_nationality,
+    compare_suffix,
+)
 from .index import (
+    DEFAULT_SIMILARITY,
     MIN_ALIGNED_TOKENS,
     RECORD_THRESHOLD,
     ListEntry,
@@ -38,8 +44,9 @@ from .index import (
     _dates_conflict,
     aligned_token_count,
     compare,
+    similarity_for,
 )
-from .normalise import normalise_name
+from .normalise import normalise_name, suffix_of
 
 log = logging.getLogger("worker.screening.store")
 
@@ -159,6 +166,10 @@ select e.id,
        e.list_name,
        e.countries,
        e.date_of_birth,
+       e.dates_of_birth,
+       e.nationalities,
+       e.places_of_birth,
+       e.citizenships,
        count(distinct q.token) as matched_tokens
   from query_tokens q
   join sanctions_name_tokens t
@@ -167,7 +178,8 @@ select e.id,
     on e.id = t.entry_id
  where e.snapshot_id = %(snapshot_id)s
  group by e.id, e.entity_id, e.name, e.entity_type, e.list_name,
-          e.countries, e.date_of_birth
+          e.countries, e.date_of_birth, e.dates_of_birth, e.nationalities,
+          e.places_of_birth, e.citizenships
  order by count(distinct q.token) desc, max(similarity(t.token, q.token)) desc
  limit %(limit)s
 """
@@ -187,6 +199,9 @@ def search(
     date_of_birth: str | None = None,
     threshold: float = RECORD_THRESHOLD,
     shortlist_limit: int = 4000,
+    similarity: str | None = None,
+    applicant_date_of_birth: object | None = None,
+    nationality: str | None = None,
 ) -> list[Match]:
     """Everything on the list this person might be, strongest first.
 
@@ -197,6 +212,8 @@ def search(
     if not query:
         return []
 
+    score_name = similarity_for(similarity)
+    applicant_suffix = suffix_of(full_name)
     all_tokens = query.split()
     if len(all_tokens) < MIN_ALIGNED_TOKENS:
         # A one-word name cannot satisfy the two-part alignment rule in stage 2
@@ -243,6 +260,10 @@ def search(
             list_name,
             countries,
             listed_dob,
+            listed_dobs,
+            nationalities,
+            places_of_birth,
+            citizenships,
             _matched,
         ) = row
 
@@ -254,23 +275,46 @@ def search(
             entity_type=entity_type,
             countries=tuple(countries or ()),
             date_of_birth=listed_dob,
+            dates_of_birth=tuple(listed_dobs or ()),
+            nationalities=tuple(nationalities or ()),
+            places_of_birth=tuple(places_of_birth or ()),
+            citizenships=tuple(citizenships or ()),
         )
-        conflict = _dates_conflict(date_of_birth, entry.date_of_birth)
+
+        dob = compare_dates_of_birth(applicant_date_of_birth, entry.dates_of_birth)
+        nat = compare_nationality(nationality, entry.nationalities)
+        # v1 keeps its own, simpler notion of a conflict so that a decision
+        # taken under an earlier ruleset stays reproducible.
+        conflict = (
+            _dates_conflict(date_of_birth, entry.date_of_birth)
+            if similarity in (None, DEFAULT_SIMILARITY)
+            else dob.conflicts
+        )
 
         for spelling in spellings.get(entry_pk, [name]):
-            score = compare(query, spelling)
-            if score < threshold:
+            # RETRIEVAL IS UNCHANGED: the v1 scorer still decides what is worth
+            # looking at, so recall cannot regress when the definition changes.
+            if compare(query, spelling) < threshold:
                 continue
             if aligned_token_count(query, spelling) < MIN_ALIGNED_TOKENS:
                 continue
+            name_score = score_name(query, spelling)
             existing = best.get(entity_id)
-            if existing is None or score > existing.score:
+            if existing is None or name_score > existing.name_score:
                 best[entity_id] = Match(
                     entry=entry,
-                    score=float(score),
+                    score=float(compare(query, spelling)),
                     matched_name=spelling,
                     date_of_birth_conflict=conflict,
+                    name_score=float(name_score),
+                    comparisons=(
+                        dob,
+                        compare_suffix(applicant_suffix, suffix_of(spelling)),
+                        nat,
+                    ),
                 )
 
     # Ties broken by entity id — see the note on the same sort in index.py.
-    return sorted(best.values(), key=lambda m: (-m.score, m.entry.entity_id))
+    return sorted(
+        best.values(), key=lambda m: (-m.name_score, -m.score, m.entry.entity_id)
+    )

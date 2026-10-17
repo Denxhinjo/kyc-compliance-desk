@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from scoring import CONFIRMED, PROBABLE, WEAK, band_of
-from screening.index import ListEntry, compare, build_index
+from screening.index import ListEntry, compare, compare_symmetric, build_index
 from screening.normalise import name_tokens, normalise_name
 
 
@@ -125,10 +125,28 @@ def test_the_bands_overlap_and_that_is_the_whole_problem():
     false_positive_one = compare("John Smith", "Jane Smith")
     false_positive_two = compare("Ahmed Hassan", "Ahmed Hussein")
 
-    assert band_of(true_match) == "weak"
-    assert band_of(false_positive_one) == "weak"
-    assert band_of(false_positive_two) == "weak"
+    assert true_match == false_positive_one == false_positive_two == 80.0
     assert abs(true_match - false_positive_one) < 2.0
+
+
+def test_the_symmetric_definition_does_separate_those_three():
+    """And v2 pulls them apart, which v1 could not.
+
+    The test above is kept because it describes the measure a live decision
+    was taken under, and that has to stay reproducible. But its conclusion --
+    "the information needed to separate them is not in the strings" -- turned
+    out to be a property of the SCORER rather than of the strings.
+
+    Under v2 the difference is which parts ALIGN. "Mohammed"/"Muhammad" are
+    the same part spelled differently and align at 75; "John"/"Jane" are
+    different parts and align at 50, below the per-token threshold. So the
+    true match covers both of its parts and the false positives cover one of
+    two, and the harmonic mean separates 82.6 from 50.0 -- a genuine match
+    labelled `strong` against two coincidences labelled `partial`.
+    """
+    assert band_of(compare_symmetric("Mohammed Al-Sayed", "Muhammad Al Sayyid")) == "strong"
+    assert band_of(compare_symmetric("John Smith", "Jane Smith")) == "partial"
+    assert band_of(compare_symmetric("Ahmed Hassan", "Ahmed Hussein")) == "partial"
 
 
 def test_a_transliteration_pair_no_threshold_can_resolve_is_fixed_by_aliases():
@@ -140,7 +158,7 @@ def test_a_transliteration_pair_no_threshold_can_resolve_is_fixed_by_aliases():
     the strongest practical argument for using real list data, which ships
     aliases, over anything hand-rolled.
     """
-    assert band_of(compare("Mohammed Al-Sayed", "Muhammad Al Sayyid")) == "weak"
+    assert compare("Mohammed Al-Sayed", "Muhammad Al Sayyid") == 80.0
 
     index = build_index(
         [
@@ -156,7 +174,7 @@ def test_a_transliteration_pair_no_threshold_can_resolve_is_fixed_by_aliases():
     matches = index.search("Mohammed Al-Sayed")
     assert len(matches) == 1
     assert matches[0].score == 100.0
-    assert band_of(matches[0].score) == "confirmed"
+    assert band_of(matches[0].score) == "exact"
 
 
 # ---------------------------------------------------------------------------
