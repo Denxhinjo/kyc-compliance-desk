@@ -13,7 +13,13 @@ from typing import Iterable
 
 from rapidfuzz import fuzz, process
 
-from .normalise import normalise_name
+from .identifiers import (
+    Comparison,
+    compare_dates_of_birth,
+    compare_nationality,
+    compare_suffix,
+)
+from .normalise import normalise_name, suffix_of
 
 #: Below this, a pair is not recorded at all.
 #:
@@ -70,7 +76,28 @@ class ListEntry:
     #: ISO date, or a partial year like "1975". Used to CONTRADICT a match, not
     #: to confirm one: a conflicting date of birth is strong evidence of a
     #: different person, while a matching one is weak evidence of the same one.
+    #:
+    #: The FIRST listed date, kept for the v1 scoring path exactly as it
+    #: behaved before 2026-10-2. New code reads `dates_of_birth`.
     date_of_birth: str | None = None
+    #: EVERY date the list publishes for this entity, in list order.
+    #:
+    #: 532 OFAC SDN entries publish more than one. Keeping only the first let
+    #: the system declare a conflict with a date the list itself also gives.
+    #: Defaults to (date_of_birth,) so every existing construction keeps
+    #: working and means what it used to.
+    dates_of_birth: tuple[str, ...] = ()
+    #: Secondary identifiers, straight from the snapshot. Empty means the list
+    #: is silent, which is shown as "not available" and never inferred.
+    nationalities: tuple[str, ...] = ()
+    places_of_birth: tuple[str, ...] = ()
+    citizenships: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.dates_of_birth and self.date_of_birth:
+            object.__setattr__(self, "dates_of_birth", (self.date_of_birth,))
+        elif self.dates_of_birth and self.date_of_birth is None:
+            object.__setattr__(self, "date_of_birth", self.dates_of_birth[0])
 
 
 @dataclass(frozen=True)
@@ -83,6 +110,17 @@ class Match:
     #: True when the entry publishes a date of birth and it disagrees with the
     #: applicant's. Recorded here, weighed in scoring.py.
     date_of_birth_conflict: bool = False
+    #: The score under the ruleset's own similarity definition. Equal to
+    #: `score` under v1, lower under v2 wherever parts went unmatched.
+    name_score: float = 0.0
+    #: Every secondary identifier, compared. See screening/identifiers.py.
+    comparisons: tuple[Comparison, ...] = ()
+
+    def comparison(self, identifier: str) -> Comparison | None:
+        for item in self.comparisons:
+            if item.identifier == identifier:
+                return item
+        return None
 
 
 def aligned_token_count(left: str, right: str) -> int:
@@ -95,13 +133,24 @@ def aligned_token_count(left: str, right: str) -> int:
 
     Order-independent, so it works for "Xi Jinping" against "Jinping Xi".
     """
+    _, _, pairs = align_tokens(left, right)
+    return len(pairs)
+
+
+def align_tokens(left: str, right: str) -> tuple[list[str], list[str], list[float]]:
+    """The alignment itself: both token lists and the score of each pair.
+
+    Split out from `aligned_token_count` so the v2 scorer can see HOW WELL the
+    parts matched and how many were left over on each side, which is the whole
+    of the difference between the two definitions.
+    """
     left_tokens = normalise_name(left).split()
     right_tokens = normalise_name(right).split()
     if not left_tokens or not right_tokens:
-        return 0
+        return left_tokens, right_tokens, []
 
     claimed: set[int] = set()
-    aligned = 0
+    pairs: list[float] = []
     for token in left_tokens:
         best_score, best_index = 0.0, None
         for index, other in enumerate(right_tokens):
@@ -112,8 +161,8 @@ def aligned_token_count(left: str, right: str) -> int:
                 best_score, best_index = score, index
         if best_index is not None and best_score >= TOKEN_ALIGNMENT_THRESHOLD:
             claimed.add(best_index)
-            aligned += 1
-    return aligned
+            pairs.append(best_score)
+    return left_tokens, right_tokens, pairs
 
 
 def compare(left: str, right: str) -> float:
@@ -139,6 +188,85 @@ def compare(left: str, right: str) -> float:
     if not a or not b:
         return 0.0
     return max(fuzz.token_set_ratio(a, b), fuzz.ratio(a, b))
+
+
+def compare_symmetric(left: str, right: str) -> float:
+    """Similarity that charges for unmatched parts on BOTH sides. (v2)
+
+    THE DEFECT THIS REPLACES
+
+    `compare` above takes max(token_set_ratio, ratio), and token_set_ratio
+    returns 100 whenever one name's tokens are a SUBSET of the other's. It is
+    blind to what the list entry has and the applicant does not. Measured on
+    the demo's own queue, 28 pairs sat at 100% while being different names:
+
+        Mohammed Nasser  ->  Abdal Nasser Sharif Mohammed Said JAMOOS   100%
+        Carlos Fernandez ->  Carlos Ariel FERNANDEZ CONCEPCION          100%
+
+    Two of six parts, announced as a perfect match. Common partial names are
+    the classic source of false positives in sanctions screening, and a
+    reviewer reading "100%" has been told the opposite of the truth.
+
+    HOW IT SCORES
+
+        precision = aligned / applicant parts   how much of the APPLICANT matched
+        recall    = aligned / list parts        how much of the LIST ENTRY matched
+        coverage  = harmonic mean of the two    an unmatched part EITHER side costs
+        quality   = mean similarity of the aligned pairs
+
+        score = 100 * coverage * quality
+
+    The harmonic mean rather than the average because it punishes the lopsided
+    case, which is exactly the failure above: precision 1.0 with recall 0.33
+    averages to a respectable 0.67 and harmonises to 0.5.
+
+    `quality` keeps transliteration drift costing something -- "Sergei Ivanoff"
+    against "Sergey Ivanov" scores 80.1 rather than 100 -- while the existing
+    per-token alignment threshold keeps it from costing too much.
+
+    PROPERTY, TESTED: the score is 100 if and only if the two normalised token
+    multisets are equal. So a reordered name ("KIM Tong-Myo'ng" against
+    "Tong-Myo'ng KIM") still scores 100, because it is the same name written
+    the other way round, and no strict subset ever can.
+    """
+    left_tokens, right_tokens, pairs = align_tokens(left, right)
+    if not left_tokens or not right_tokens or not pairs:
+        return 0.0
+
+    aligned = len(pairs)
+    precision = aligned / len(left_tokens)
+    recall = aligned / len(right_tokens)
+    coverage = 2 * precision * recall / (precision + recall)
+    quality = sum(pairs) / aligned / 100.0
+    return 100.0 * coverage * quality
+
+
+#: The similarity definitions a ruleset can name.
+#:
+#: A ruleset row selects one of these by key. `rulesets` is append-only, so
+#: 2026-10-1's row cannot be amended to name its own definition -- which is
+#: why an ABSENT key means v1. That is not a default for convenience: it is
+#: what makes "reconstruct any decision" true. A decision stamped 2026-10-1
+#: can never be replayed under v2, and nothing stamped 2026-10-2 under v1.
+SIMILARITY_DEFINITIONS = {
+    "v1-max-token-set": compare,
+    "v2-symmetric-coverage": compare_symmetric,
+}
+
+#: What a ruleset that names no definition gets. See above.
+DEFAULT_SIMILARITY = "v1-max-token-set"
+
+
+def similarity_for(name: str | None):
+    """The scorer a ruleset names, or v1 where it names none."""
+    key = name or DEFAULT_SIMILARITY
+    try:
+        return SIMILARITY_DEFINITIONS[key]
+    except KeyError:
+        raise ValueError(
+            f"unknown name similarity definition {key!r}; "
+            f"a ruleset names one of {sorted(SIMILARITY_DEFINITIONS)}"
+        ) from None
 
 
 @dataclass
@@ -175,6 +303,9 @@ class SanctionsIndex:
         *,
         date_of_birth: str | None = None,
         threshold: float = RECORD_THRESHOLD,
+        similarity: str | None = None,
+        applicant_date_of_birth: object | None = None,
+        nationality: str | None = None,
     ) -> list[Match]:
         """Everything on the list this person might be, strongest first.
 
@@ -185,6 +316,13 @@ class SanctionsIndex:
         query = normalise_name(full_name)
         if not query:
             return []
+
+        # RETRIEVAL IS NOT RESCORED. The two-pass extract below stays exactly
+        # as it was under v1, so every candidate that surfaced before still
+        # surfaces: changing the definition must not quietly reduce recall.
+        # What the ruleset selects is how a surfaced candidate is SCORED.
+        score_name = similarity_for(similarity)
+        applicant_suffix = suffix_of(full_name)
 
         choices = [item[0] for item in self._searchable]
 
@@ -214,14 +352,37 @@ class SanctionsIndex:
             if aligned_token_count(query, original_spelling) < MIN_ALIGNED_TOKENS:
                 continue
 
-            conflict = _dates_conflict(date_of_birth, entry.date_of_birth)
+            name_score = score_name(query, original_spelling)
+
+            dob = compare_dates_of_birth(applicant_date_of_birth, entry.dates_of_birth)
+            comparisons = (
+                dob,
+                compare_suffix(applicant_suffix, suffix_of(original_spelling)),
+                compare_nationality(nationality, entry.nationalities),
+            )
+
+            # v1 keeps its own notion of a conflict, which knows nothing about
+            # multiple dates or imprecise ones. A decision taken under an
+            # earlier ruleset has to stay reproducible, so this is not
+            # "improved" for the v1 path.
+            conflict = (
+                _dates_conflict(date_of_birth, entry.date_of_birth)
+                if similarity in (None, DEFAULT_SIMILARITY)
+                else dob.conflicts
+            )
+
             existing = best.get(entry.entity_id)
-            if existing is None or score > existing.score:
+            # Ranked by the ruleset's own score: under v2 a different alias may
+            # be the best spelling, and the recorded one must be the one that
+            # actually scored best under the definition in force.
+            if existing is None or name_score > existing.name_score:
                 best[entry.entity_id] = Match(
                     entry=entry,
                     score=float(score),
                     matched_name=original_spelling,
                     date_of_birth_conflict=conflict,
+                    name_score=float(name_score),
+                    comparisons=comparisons,
                 )
 
         # Sorted by score, then by entity id to break ties.
@@ -237,7 +398,9 @@ class SanctionsIndex:
         # result positions: stable within a run, arbitrary between
         # implementations, and not a property anybody had chosen. Sorting by
         # entity id makes it a decision rather than an accident.
-        return sorted(best.values(), key=lambda m: (-m.score, m.entry.entity_id))
+        return sorted(
+            best.values(), key=lambda m: (-m.name_score, -m.score, m.entry.entity_id)
+        )
 
 
 def _dates_conflict(applicant: str | None, listed: str | None) -> bool:

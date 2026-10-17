@@ -1,0 +1,869 @@
+{
+ "note": "Fixed evaluation set for the 2026-10-2 matcher change. Real pairs come from the local demo database; constructed pairs cover reordering, transliteration, subsets and accents. v1/v2 are measured, not asserted by hand.",
+ "pairs": [
+  {
+   "applicant": "Ahmed Hassan",
+   "list_entry": "Ahmed Hussein",
+   "note": "different surname, same first name",
+   "v1": 80.0,
+   "v2": 50.0,
+   "expected_band": "partial",
+   "same_name": false
+  },
+  {
+   "applicant": "John Smith",
+   "list_entry": "Jane Smith",
+   "note": "different first name, same surname",
+   "v1": 80.0,
+   "v2": 50.0,
+   "expected_band": "partial",
+   "same_name": false
+  },
+  {
+   "applicant": "Mohammed Nasser",
+   "list_entry": "Abdal Nasser Sharif Mohammed Said JAMOOS",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 50.0,
+   "expected_band": "partial",
+   "same_name": false
+  },
+  {
+   "applicant": "'Abd al-Rahman Muhammad JAFFAR 'ALI",
+   "list_entry": "'ABD AL-RAHMAN",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 66.7,
+   "expected_band": "partial",
+   "same_name": false
+  },
+  {
+   "applicant": "Carlos Fernandez",
+   "list_entry": "Carlos Ariel FERNANDEZ CONCEPCION",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 66.7,
+   "expected_band": "partial",
+   "same_name": false
+  },
+  {
+   "applicant": "Carlos Garcia",
+   "list_entry": "Carlos Alberto GAXIOLA GARCIA",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 66.7,
+   "expected_band": "partial",
+   "same_name": false
+  },
+  {
+   "applicant": "Elena Garcia",
+   "list_entry": "Maria Elena GAXIOLA GARCIA",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 66.7,
+   "expected_band": "partial",
+   "same_name": false
+  },
+  {
+   "applicant": "Hassan Al-Rashid",
+   "list_entry": "Salim Hassan Khalifa Rashid AL KUWARI",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 66.7,
+   "expected_band": "partial",
+   "same_name": false
+  },
+  {
+   "applicant": "Ibrahim Osei",
+   "list_entry": "DR. IBRAHIM",
+   "note": "single-token entry behind an honorific",
+   "v1": 100.0,
+   "v2": 66.7,
+   "expected_band": "partial",
+   "same_name": false
+  },
+  {
+   "applicant": "Mohammed bint Omar Mansour",
+   "list_entry": "Mohammed OMAR",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 66.7,
+   "expected_band": "partial",
+   "same_name": false
+  },
+  {
+   "applicant": "Sa'ad Muhammad Yunis AL-AHMAD",
+   "list_entry": "Muhammad Yunis AHMAD",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 66.7,
+   "expected_band": "partial",
+   "same_name": false
+  },
+  {
+   "applicant": "Sarah Khan",
+   "list_entry": "KHAN",
+   "note": "single-token list entry",
+   "v1": 100.0,
+   "v2": 66.7,
+   "expected_band": "partial",
+   "same_name": false
+  },
+  {
+   "applicant": "Sa'ad Muhammad Yunis AL-AHMAD",
+   "list_entry": "Ahmad Muhammad Yunis AL-AHMAD",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 72.7,
+   "expected_band": "partial",
+   "same_name": false
+  },
+  {
+   "applicant": "Andrei Petrov",
+   "list_entry": "Andrei Yuvenalyevich PETROV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 80.0,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Carlos Garcia",
+   "list_entry": "GARCIA, Carlos Alberto",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 80.0,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Ibrahim Khalil",
+   "list_entry": "Ibrahim Mohamed KHALIL",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 80.0,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Mohammed Khalil",
+   "list_entry": "Mohammed Khalil ZADEH",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 80.0,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Mohammed Khalil",
+   "list_entry": "Khalil Mohammed AZZAM",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 80.0,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Mohammed Khalil",
+   "list_entry": "Khaled Mohammed KHALIL",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 80.0,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Myo Aung Win",
+   "list_entry": "Aung WIN",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 80.0,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Sergey Ivanov",
+   "list_entry": "Sergey Sergeevich IVANOV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 80.0,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Sergey Ivanov",
+   "list_entry": "Sergey Borisovich IVANOV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 80.0,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Song Chol KIM",
+   "list_entry": "Song KIM",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 80.0,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Song Chol KIM",
+   "list_entry": "Chol KIM",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 80.0,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Vladimir Putin",
+   "list_entry": "Vladimir Vladimirovich Putin",
+   "note": "dropped patronymic",
+   "v1": 100.0,
+   "v2": 80.0,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Sergey Ivanov",
+   "list_entry": "Sergei Ivanoff",
+   "note": "transliteration variant",
+   "v1": 81.5,
+   "v2": 80.1,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Mohammed Al-Sayed",
+   "list_entry": "Muhammad Al Sayyid",
+   "note": "transliteration variant",
+   "v1": 80.0,
+   "v2": 82.6,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "Osiel CARDENAS GUILLEN",
+   "list_entry": "OSIEL CARDENAS-GUILLEN ORGANIZATION",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 85.7,
+   "expected_band": "strong",
+   "same_name": false
+  },
+  {
+   "applicant": "'Abd al-Rahman Muhammad JAFFAR 'ALI",
+   "list_entry": "'Abd al-Rahman Muhammad JAFFAR 'ALI",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Abbas ABDI ASJERD",
+   "list_entry": "Abbas ABDI ASJERD",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Abdallah HAMIEH",
+   "list_entry": "Abdallah HAMIEH",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Abdollah ARAGHI",
+   "list_entry": "Abdollah ARAGHI",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Aleksandr Vitalyevich NEZHENTSEV",
+   "list_entry": "Aleksandr Vitalyevich NEZHENTSEV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Aleksei Alekseevich MALYAREVICH",
+   "list_entry": "Aleksei Alekseevich MALYAREVICH",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Alexander Aleksandrovich MOSKOVSKY",
+   "list_entry": "Alexander Aleksandrovich MOSKOVSKY",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Alexander Konstantinovich AKIMOV",
+   "list_entry": "Alexander Konstantinovich AKIMOV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Alexandr MOROZOV",
+   "list_entry": "Alexandr MOROZOV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Andrei Vladimirovich SKOCH",
+   "list_entry": "Andrei Vladimirovich SKOCH",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Andres Laureano GONZALEZ BRITO",
+   "list_entry": "Andres Laureano GONZALEZ BRITO",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Anna Stanislavovna MOLCHANOVA",
+   "list_entry": "Anna Stanislavovna MOLCHANOVA",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Anna Vladimirovna ANYUKHINA",
+   "list_entry": "Anna Vladimirovna ANYUKHINA",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Anton Andreyevich ALIKHANOV",
+   "list_entry": "Anton Andreyevich ALIKHANOV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Arnas GRINEVICIUS",
+   "list_entry": "Arnas GRINEVICIUS",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Aung Win",
+   "list_entry": "Aung WIN",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Azizjon Makhmudovich MAMASHOYEV",
+   "list_entry": "Azizjon Makhmudovich MAMASHOYEV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Carlos Arturo PATINO RESTREPO",
+   "list_entry": "Carlos Arturo PATINO RESTREPO",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Daniel RODRIGUEZ OLIVERA",
+   "list_entry": "Daniel RODRIGUEZ OLIVERA",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Dmitrii Vladimirovich ALIKHANOV",
+   "list_entry": "Dmitrii Vladimirovich ALIKHANOV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Elkin Alexis SANCHEZ SILVA",
+   "list_entry": "Elkin Alexis SANCHEZ SILVA",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Fermin VILA MICHELENA",
+   "list_entry": "Fermin VILA MICHELENA",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Francesco SCHIAVONE",
+   "list_entry": "Francesco SCHIAVONE",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Ghassan ABBAS",
+   "list_entry": "Ghassan ABBAS",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Gustave KUBWAYO",
+   "list_entry": "Gustave KUBWAYO",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Haji BANDO",
+   "list_entry": "Haji BANDO",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Hani 'Abd-al-Majid Muhammad AS'AD",
+   "list_entry": "Hani 'Abd-al-Majid Muhammad AS'AD",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Hector Luis PALMA SALAZAR",
+   "list_entry": "Hector Luis PALMA SALAZAR",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Indu RANI",
+   "list_entry": "Indu RANI",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Jefferson KOIJEE",
+   "list_entry": "Jefferson KOIJEE",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Jonathan ALVAREZ ESCOBAR",
+   "list_entry": "Jonathan ALVAREZ ESCOBAR",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Jordan KAMCEV",
+   "list_entry": "Jordan KAMCEV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Jose German VALADEZ FLORES",
+   "list_entry": "Jose German VALADEZ FLORES",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Jose Gil CARO QUINTERO",
+   "list_entry": "Jose Gil CARO QUINTERO",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Jose Munoz",
+   "list_entry": "José Muñoz",
+   "note": "accents only",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "KIM Tong-Myo'ng",
+   "list_entry": "Tong-Myo'ng KIM",
+   "note": "reordered: surname first vs last",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Kemen URANGA ARTOLA",
+   "list_entry": "Kemen URANGA ARTOLA",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Kur AJING ATER",
+   "list_entry": "Kur AJING ATER",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Leonid Ivanovich PASECHNIK",
+   "list_entry": "Leonid Ivanovich PASECHNIK",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Marat Shakirzyanovich KHUSNULLIN",
+   "list_entry": "Marat Shakirzyanovich KHUSNULLIN",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Mario Alberto HENAO JARAMILLO",
+   "list_entry": "Mario Alberto HENAO JARAMILLO",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Masoud SHOUSHTARIPOUSTI",
+   "list_entry": "Masoud SHOUSHTARIPOUSTI",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Mohsen HOJATI",
+   "list_entry": "Mohsen HOJATI",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Nikolay Nikolayevich KOSOV",
+   "list_entry": "Nikolay Nikolayevich KOSOV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Oleg Aleksandrovich LEBEDEV",
+   "list_entry": "Oleg Aleksandrovich LEBEDEV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Osiel CARDENAS GUILLEN",
+   "list_entry": "Osiel CARDENAS GUILLEN",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Qi GAO",
+   "list_entry": "Qi GAO",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Qianjiang WEI",
+   "list_entry": "Qianjiang WEI",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Raisa Vasilievna KARMAZINA",
+   "list_entry": "Raisa Vasilievna KARMAZINA",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Raman Leanidavich PODLINEU",
+   "list_entry": "Raman Leanidavich PODLINEU",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Ramzan Akhmatovich KADYROV",
+   "list_entry": "Ramzan Akhmatovich KADYROV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Ranveer SINGH",
+   "list_entry": "Ranveer SINGH",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Roman Aleksandrovich KOTEKIN",
+   "list_entry": "Roman Aleksandrovich KOTEKIN",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Roman Borisovich ROTENBERG",
+   "list_entry": "Roman Borisovich ROTENBERG",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Sa'ad Muhammad Yunis AL-AHMAD",
+   "list_entry": "Sa'ad Muhammad Yunis AL-AHMAD",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Sergey Alexandrovich PAHOMOV",
+   "list_entry": "Sergey Alexandrovich PAHOMOV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Sergey Ivanov",
+   "list_entry": "Sergey IVANOV JR.",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Song Chol KIM",
+   "list_entry": "Song Chol KIM",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Sudhir KUMAR",
+   "list_entry": "Sudhir KUMAR",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Tong-Myo'ng KIM",
+   "list_entry": "Tong-Myo'ng KIM",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Valery BOLOTOV",
+   "list_entry": "Valery BOLOTOV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Vanessa VALENZUELA VALENZUELA",
+   "list_entry": "Vanessa VALENZUELA VALENZUELA",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Viktor Ivanov",
+   "list_entry": "Viktor IVANOV",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Vladislav Yuryevich ZANIN",
+   "list_entry": "Vladislav Yuryevich ZANIN",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Wei Zhang",
+   "list_entry": "Zhang WEI",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Wei Zhang",
+   "list_entry": "Wei ZHANG",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Yadollah BUALI",
+   "list_entry": "Yadollah BUALI",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  },
+  {
+   "applicant": "Yong Son JANG",
+   "list_entry": "Yong Son JANG",
+   "note": "from the live queue at >=99 under v1",
+   "v1": 100.0,
+   "v2": 100.0,
+   "expected_band": "exact",
+   "same_name": true
+  }
+ ]
+}

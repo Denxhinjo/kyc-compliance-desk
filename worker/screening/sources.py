@@ -75,6 +75,13 @@ def _entry_from_json(raw: dict) -> ListEntry:
         entity_type=str(raw.get("entity_type") or "sanctions"),
         countries=tuple(raw.get("countries") or ()),
         date_of_birth=raw.get("date_of_birth"),
+        # Absent in snapshots written before 2026-10-2. Empty then means
+        # "this parser never read the field", which the interface shows as
+        # "not available" rather than filling in from anywhere else.
+        dates_of_birth=tuple(raw.get("dates_of_birth") or ()),
+        nationalities=tuple(raw.get("nationalities") or ()),
+        places_of_birth=tuple(raw.get("places_of_birth") or ()),
+        citizenships=tuple(raw.get("citizenships") or ()),
     )
 
 
@@ -412,6 +419,10 @@ def load_into_postgres(conn, index: SanctionsIndex, *, batch: int = 1000) -> int
                         entry.list_name,
                         list(entry.countries),
                         entry.date_of_birth,
+                        list(entry.dates_of_birth),
+                        list(entry.nationalities),
+                        list(entry.places_of_birth),
+                        list(entry.citizenships),
                     )
                 )
                 for position, spelling in enumerate((entry.name, *entry.aliases)):
@@ -429,7 +440,9 @@ def load_into_postgres(conn, index: SanctionsIndex, *, batch: int = 1000) -> int
 
             with cur.copy(
                 "copy sanctions_entries (id, snapshot_id, entity_id, name, "
-                "entity_type, list_name, countries, date_of_birth) from stdin"
+                "entity_type, list_name, countries, date_of_birth, "
+                "dates_of_birth, nationalities, places_of_birth, "
+                "citizenships) from stdin"
             ) as copy:
                 for row in entry_rows:
                     copy.write_row(row)

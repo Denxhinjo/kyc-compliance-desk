@@ -242,7 +242,11 @@ def test_the_endpoint_refuses_without_the_secret(monkeypatch):
         spec.loader.exec_module(module)
         return module
 
+    # BOTH must be cleared. Clearing one and inheriting the other from the
+    # developer's own environment is how a test like this passes while
+    # asserting nothing.
     monkeypatch.setenv("DRAIN_SECRET", "")
+    monkeypatch.setenv("DRAIN_SECRET_SCHEDULER", "")
     module = load()
     assert module.authorised({"x-drain-secret": ""}) is False
     assert module.authorised({"x-drain-secret": "anything"}) is False
@@ -252,6 +256,71 @@ def test_the_endpoint_refuses_without_the_secret(monkeypatch):
     assert module.authorised({"x-drain-secret": "s3cret"}) is True
     assert module.authorised({"x-drain-secret": "wrong"}) is False
     assert module.authorised({}) is False
+
+
+def test_the_endpoint_accepts_either_caller_s_secret(monkeypatch):
+    """Two callers, two secrets, revocable independently.
+
+    GitHub Actions runs the hourly backup; an external scheduler
+    (cron-job.org) calls every ten minutes because GitHub fires its hourly
+    schedule roughly five times a day. They are different parties -- a
+    workflow in this repository and an account on somebody else's website --
+    and sharing one secret would mean that rotating it after the third party
+    is compromised also silences the backup that exists to cover exactly that.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    endpoint = Path(__file__).resolve().parent.parent.parent / "api" / "drain.py"
+
+    def load():
+        spec = importlib.util.spec_from_file_location("_drain_endpoint", endpoint)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    monkeypatch.setenv("DRAIN_SECRET", "github-secret")
+    monkeypatch.setenv("DRAIN_SECRET_SCHEDULER", "scheduler-secret")
+    module = load()
+
+    assert module.authorised({"x-drain-secret": "github-secret"}) is True
+    assert module.authorised({"x-drain-secret": "scheduler-secret"}) is True
+    assert module.authorised({"x-drain-secret": "neither-of-them"}) is False
+    assert module.authorised({"x-drain-secret": ""}) is False
+    assert module.authorised({}) is False
+
+    # Revoking one leaves the other working. This is the whole reason there
+    # are two.
+    monkeypatch.setenv("DRAIN_SECRET_SCHEDULER", "")
+    module = load()
+    assert module.authorised({"x-drain-secret": "github-secret"}) is True
+    assert module.authorised({"x-drain-secret": "scheduler-secret"}) is False
+
+    monkeypatch.setenv("DRAIN_SECRET", "")
+    monkeypatch.setenv("DRAIN_SECRET_SCHEDULER", "scheduler-secret")
+    module = load()
+    assert module.authorised({"x-drain-secret": "scheduler-secret"}) is True
+    assert module.authorised({"x-drain-secret": "github-secret"}) is False
+
+
+def test_the_service_page_names_the_callers_but_never_the_secrets(monkeypatch):
+    """Useful when the scheduler starts returning 401 and the question is
+    whether the variable reached the deployment at all."""
+    import importlib.util
+    from pathlib import Path
+
+    endpoint = Path(__file__).resolve().parent.parent.parent / "api" / "drain.py"
+    monkeypatch.setenv("DRAIN_SECRET", "github-secret")
+    monkeypatch.setenv("DRAIN_SECRET_SCHEDULER", "scheduler-secret")
+    spec = importlib.util.spec_from_file_location("_drain_endpoint", endpoint)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    source = endpoint.read_text(encoding="utf-8")
+    assert '"accepts"' in source
+    # The values themselves must never be rendered.
+    assert "DRAIN_SECRET}" not in source
+    assert module.DRAIN_SECRET == "github-secret"
 
 
 # ---------------------------------------------------------------------------

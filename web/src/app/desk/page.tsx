@@ -12,6 +12,7 @@ interface Row {
   full_name: string;
   address_country: string;
   risk_score: number | null;
+  risk_ruleset_version: string | null;
   risk_signals: { signals?: { code: string; points: number; reason: string }[] } | null;
   referred_at: string;
   waiting_seconds: number;
@@ -44,6 +45,7 @@ async function pendingCases(): Promise<Row[]> {
             a.full_name,
             a.address_country,
             a.risk_score,
+            a.risk_ruleset_version,
             a.risk_signals,
             r.decided_at::text as referred_at,
             extract(epoch from (now() - r.decided_at))::int as waiting_seconds,
@@ -121,6 +123,7 @@ export default async function QueuePage() {
     name: row.full_name,
     country: row.address_country,
     score: row.risk_score ?? 0,
+    ruleset: row.risk_ruleset_version,
     reason: topReason(row),
     waitingSeconds: row.waiting_seconds,
     personApplications: row.person_applications,
