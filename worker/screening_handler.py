@@ -27,6 +27,7 @@ from config import SANCTIONS_SOURCE
 from handlers import PermanentError, handler
 from jobs import Job
 from scoring import (
+    NAME_SIMILARITY,
     ApplicantProfile,
     RiskAssessment,
     Routing,
@@ -80,11 +81,18 @@ def run_screening(conn: psycopg.Connection, job: Job) -> None:
     # auditor actually asks.
     snapshot_id = snapshot.snapshot_id
 
+    # The ruleset in force selects the similarity definition. Not a flag:
+    # see scoring.NAME_SIMILARITY.
     matches = search_list(
         conn,
         snapshot,
         application["full_name"],
         date_of_birth=str(application["date_of_birth"]),
+        similarity=NAME_SIMILARITY,
+        applicant_date_of_birth=application["date_of_birth"],
+        # Release B collects this; until then every comparison reads
+        # "not available", which is shown rather than hidden.
+        nationality=application.get("nationality"),
     )
 
     _store_matches(conn, application_id, snapshot.source, matches, snapshot_id)
@@ -97,9 +105,13 @@ def run_screening(conn: psycopg.Connection, job: Job) -> None:
                 match_type=m.entry.entity_type,
                 list_name=m.entry.list_name,
                 matched_name=m.matched_name,
-                match_score=m.score,
+                # The ruleset's own score, not the retrieval score. Under v1
+                # these are the same number; under v2 the retrieval score is
+                # only used to decide what was worth looking at.
+                match_score=m.name_score,
                 entity_id=m.entry.entity_id,
                 date_of_birth_conflict=m.date_of_birth_conflict,
+                comparisons=tuple(c.as_dict() for c in m.comparisons),
             )
             for m in matches
         ),

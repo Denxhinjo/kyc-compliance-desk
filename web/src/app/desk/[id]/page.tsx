@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { pool } from "@/lib/db";
+import { CURRENT_RULESET } from "@/lib/ruleset";
 import { requireStaff } from "@/lib/session";
 import { DecisionForm } from "./decision-form";
 
@@ -279,12 +280,39 @@ export default async function CasePage({
         )}
         {application.risk_signals?.thresholds && (
           <p className="dim small">
-            Ruleset {application.risk_ruleset_version} · auto-approve below{" "}
+            Ruleset{" "}
+            <Link href="/desk/rulesets">{application.risk_ruleset_version}</Link>{" "}
+            · auto-approve below{" "}
             {application.risk_signals.thresholds.auto_approve_below} · auto-reject
             at {application.risk_signals.thresholds.auto_reject_at_or_above}
             {referral && ` · referred ${referral.decided_at.slice(0, 16)}`}
           </p>
         )}
+
+        {/* WHAT THE LABELS ON THIS CASE MEAN.
+
+            Up to ruleset 2026-10-1 a match was labelled "confirmed" or
+            "probable" and that label came from name similarity alone, with a
+            scorer that returned 100% whenever the applicant's name appeared
+            INSIDE a longer list name. 2026-10-2 replaced both the measure and
+            the vocabulary.
+
+            The stored reason text is not rewritten — it is the evidence the
+            decision was taken on, and editing it would destroy the thing this
+            system exists to preserve. So a case scored under an older version
+            still reads in the older vocabulary, and says so here rather than
+            letting a reviewer assume today's meaning. */}
+        {application.risk_ruleset_version &&
+          application.risk_ruleset_version !== CURRENT_RULESET && (
+            <p className="notice small">
+              Scored under ruleset {application.risk_ruleset_version}. The match
+              labels below use that version&apos;s vocabulary, in which
+              &ldquo;confirmed&rdquo; meant a name-similarity score and not a
+              judgement about identity. They are shown as recorded and have not
+              been rewritten.{" "}
+              <Link href="/desk/rulesets">Compare rules versions →</Link>
+            </p>
+          )}
       </section>
 
       {/* Everything side by side. The officer's job is COMPARISON — is this

@@ -18,15 +18,31 @@ from __future__ import annotations
 import re
 import unicodedata
 
-#: Honorifics and suffixes that carry no identifying information but do carry
-#: characters, which is enough to move a score by several points.
-_NOISE_TOKENS = frozenset(
+#: Honorifics. No identifying information, but real characters, which is
+#: enough to move a score by several points.
+_HONORIFICS = frozenset(
     {
         "mr", "mrs", "ms", "miss", "dr", "prof", "sir", "dame", "lord", "lady",
         "hon", "rev", "sheikh", "sheikha", "hajji",
-        "jr", "sr", "ii", "iii", "iv",
     }
 )
+
+#: Generational suffixes, which used to be discarded with the honorifics.
+#:
+#: THEY ARE NOT NOISE. "Jr" and "Sr" are the one piece of a written name whose
+#: entire job is to distinguish two people who share every other part of it —
+#: usually a father and a son living at the same address. Folding them away
+#: made "Sergey Ivanov" and "Sergey IVANOV JR." normalise to the same string
+#: and score as an exact match, which is the opposite of what the suffix is
+#: for.
+#:
+#: They are still removed from the string used for NAME similarity, because a
+#: name is the same name with or without one. They come back as a separate
+#: identifier, compared like a date of birth: agree, conflict, or not
+#: available. See compare_suffix().
+_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv", "v"})
+
+_NOISE_TOKENS = _HONORIFICS | _SUFFIXES
 
 _NON_NAME = re.compile(r"[^a-z0-9\s]")
 _WHITESPACE = re.compile(r"\s+")
@@ -73,3 +89,16 @@ def name_tokens(value: str) -> frozenset[str]:
     dominates everything else.
     """
     return frozenset(normalise_name(value).split())
+
+
+def suffix_of(value: str) -> str | None:
+    """The generational suffix written on a name, or None.
+
+    Returns the normalised form ("jr", "iii"), never the spelling, so that
+    "Jr.", "JR" and "jr" are one value. The caller shows the original.
+    """
+    folded = _NON_NAME.sub(" ", strip_accents(value).lower())
+    found = [t for t in _WHITESPACE.split(folded) if t in _SUFFIXES]
+    # Last one wins: "John Smith Jr" has one, and a name carrying two is
+    # malformed rather than meaningfully both.
+    return found[-1] if found else None

@@ -2349,3 +2349,26 @@ pre {
   overflow: auto;
   padding: var(--space-3);
 }
+
+/* The queue's Rules column: which ruleset scored each row.
+   Quiet — it is context for a comparison, not a risk signal.
+
+   Wide enough for the version AND the "older" marker beside it. The queue is
+   `table-layout: fixed`, so a column narrower than its content does not grow:
+   it spills over the next column, which is how this first shipped, with the
+   marker sitting in front of the flag text as though it described it. */
+.col-rules {
+  white-space: nowrap;
+  width: 10.5rem;
+}
+/* Marks a row scored by an older definition, whose flag wording therefore
+   uses an older vocabulary. Neutral, not a warning: the row is correct, it
+   just means what it meant then. */
+.stale-rules {
+  background: var(--neutral-bg);
+  border-radius: var(--radius-pill);
+  color: var(--neutral-text);
+  font-size: var(--text-xs);
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+}

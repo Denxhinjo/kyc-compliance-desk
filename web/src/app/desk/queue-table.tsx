@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { CURRENT_RULESET } from "@/lib/ruleset";
 
 export interface QueueRow {
   id: string;
@@ -12,6 +13,8 @@ export interface QueueRow {
   waitingSeconds: number;
   /** Total applications from this person, including this one. 1 means unique. */
   personApplications: number;
+  /** The ruleset that scored it. Null on rows scored before versions existed. */
+  ruleset: string | null;
 }
 
 /**
@@ -158,6 +161,11 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
             <th className="col-score">Score</th>
             <th className="col-name">Applicant</th>
             <th className="col-country">Country</th>
+            {/* Which rules produced this row's score and the wording of its
+                flag. Two cases can sit side by side here having been scored
+                by different definitions, and an officer comparing them needs
+                to see that rather than deduce it. */}
+            <th className="col-rules">Rules</th>
             <th>Top flag</th>
           </tr>
         </thead>
@@ -192,6 +200,17 @@ export function QueueTable({ rows }: { rows: QueueRow[] }) {
                 )}
               </td>
               <td className="mono dim">{row.country}</td>
+              <td className="mono dim col-rules">
+                {row.ruleset ?? "—"}
+                {row.ruleset && row.ruleset !== CURRENT_RULESET && (
+                  <span
+                    className="stale-rules"
+                    title={`Scored under ${row.ruleset}. Its match labels use that version's vocabulary, in which "confirmed" came from name similarity alone. Shown as recorded.`}
+                  >
+                    older
+                  </span>
+                )}
+              </td>
               {/* Clamped to one line so every row is the same height. The full
                   sentence is here on hover and printed in full on the case
                   view, which is where it is read rather than scanned. */}

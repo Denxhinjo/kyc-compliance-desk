@@ -88,6 +88,15 @@ def publication_info(root, ns: dict[str, str]) -> dict[str, str | None]:
     }
 
 
+def _unique(values) -> list[str]:
+    """Non-empty values, de-duplicated, in the order the publisher gave them."""
+    seen: list[str] = []
+    for value in values:
+        if value and value not in seen:
+            seen.append(value)
+    return seen
+
+
 def parse(xml_bytes: bytes) -> list[dict]:
     root = ElementTree.fromstring(xml_bytes)
     ns = _namespace_of(root)
@@ -127,12 +136,41 @@ def parse(xml_bytes: bytes) -> list[dict]:
             if country and country not in countries:
                 countries.append(country)
 
-        date_of_birth = None
+        # EVERY date, not the first. 532 entries publish more than one and
+        # Hasan NASRALLAH publishes four; keeping one let the screener call a
+        # "conflict" against a date the list itself also gives. Order is the
+        # publisher's, and the values stay verbatim: "circa 1951" and
+        # "1950 to 1955" are real and are not ours to reinterpret here.
+        dates_of_birth: list[str] = []
         for dob in entity.findall("sdn:dateOfBirthList/sdn:dateOfBirthItem", ns):
             raw = _text(dob, "sdn:dateOfBirth", ns)
-            if raw:
-                date_of_birth = raw
-                break
+            if raw and raw not in dates_of_birth:
+                dates_of_birth.append(raw)
+
+        # Secondary identifiers. A name match is a potential match; these are
+        # what a reviewer compares to decide whether it is the same person.
+        # Published by OFAC for 75.6%, 64.1% and 13.7% of individuals
+        # respectively, and discarded entirely before 2026-10-2.
+        nationalities = _unique(
+            _text(item, "sdn:country", ns)
+            for item in entity.findall("sdn:nationalityList/sdn:nationality", ns)
+        )
+        citizenships = _unique(
+            _text(item, "sdn:country", ns)
+            for item in entity.findall("sdn:citizenshipList/sdn:citizenship", ns)
+        )
+        places_of_birth = _unique(
+            _text(item, "sdn:placeOfBirth", ns)
+            for item in entity.findall(
+                "sdn:placeOfBirthList/sdn:placeOfBirthItem", ns
+            )
+        )
+
+        # NO ID NUMBERS. OFAC's idList is not a list of identity documents:
+        # its commonest idType values are "Secondary sanctions risk:",
+        # "Gender", "Registration Number" and "Organization Established Date".
+        # Reading it as identity documents would publish people's gender in a
+        # field labelled ID number.
 
         entries.append(
             {
@@ -143,7 +181,13 @@ def parse(xml_bytes: bytes) -> list[dict]:
                 # SDN is a sanctions list. It contains no PEP designations.
                 "entity_type": "sanctions",
                 "countries": countries,
-                "date_of_birth": date_of_birth,
+                # Kept so an older snapshot and an older ruleset still mean
+                # what they meant: the first listed date.
+                "date_of_birth": dates_of_birth[0] if dates_of_birth else None,
+                "dates_of_birth": dates_of_birth,
+                "nationalities": nationalities,
+                "citizenships": citizenships,
+                "places_of_birth": places_of_birth,
                 "sdn_type": sdn_type,
             }
         )
