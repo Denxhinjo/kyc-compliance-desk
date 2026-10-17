@@ -15,21 +15,16 @@ const REPO = "https://github.com/Denxhinjo/kyc-compliance-desk";
  *
  * The reference's page runs on "without the operational chaos" and "reliable,
  * scalable, designed for regulated environments" — adjectives a visitor cannot
- * check and this project has no standing to use. Everything below is either
- * demonstrable in two clicks or measurable in the database:
+ * check and this project has no standing to use. Every claim kept here is
+ * either demonstrable in two clicks or measurable in the database, and the
+ * four cards below follow the same rule: each names a mechanism, and each is
+ * reachable from the nav.
  *
- *   "pinned to the version of the rules that produced it"
- *       decisions.risk_ruleset_version_at_decision, non-null on all 784
- *       decisions, back to the earliest on 2026-08-19.
- *   "those rules are stored in full"
- *       the rulesets table: points, thresholds and country lists per version,
- *       append-only, and readable at /desk/rulesets.
- *   "the evidence it was decided on is frozen"
- *       migration 020 refuses changes to the risk columns once a decision
- *       exists.
- *
- * The four cards below follow the same rule: each names a mechanism, and each
- * is reachable from the nav.
+ * The headline's "any" rests on decisions.risk_ruleset_version_at_decision,
+ * and the live queue beside it is read from the database on the request. The
+ * explanatory subline that used to sit under the headline was removed on
+ * 2026-10-17 — the page says less now, which is a stronger position than
+ * saying more, since what remains is visible on the screen beside it.
  */
 export default function Home() {
   return (
@@ -41,13 +36,6 @@ export default function Home() {
           <h1 className="landing-headline">
             Reconstruct any KYC decision months later
           </h1>
-
-          <p className="landing-sub">
-            Every decision is pinned to the version of the rules that produced
-            it, and those rules are stored in full — the points, the thresholds
-            and the country lists. Nothing has to be inferred from today&apos;s
-            code.
-          </p>
 
           <div className="landing-cta">
             <Link className="button button-primary" href="/desk">
@@ -73,11 +61,6 @@ export default function Home() {
             </svg>
           </span>
           <h2>Scores that say why</h2>
-          <p>
-            Each signal contributes fixed points with a reason in plain words.
-            No model, so the answer to &ldquo;why was this refused&rdquo; is a
-            sentence rather than a number.
-          </p>
         </article>
 
         <article className="feature">
